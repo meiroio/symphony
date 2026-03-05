@@ -3,8 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun run src/cli.ts",
-    "start": "bun run src/cli.ts",
+    "dev": "NODE_ENV=development bun run src/cli.ts",
+    "prod": "NODE_ENV=production bun run src/cli.ts",
+    "start": "bun run prod",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "check:pr-body": "bun run scripts/check-pr-body.ts"

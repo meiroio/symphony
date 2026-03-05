@@ -35,7 +35,7 @@ Quick start:
 ```bash
 cd bun
 bun install
-bun run src/cli.ts ./WORKFLOW.test.md --port 8789
+bun dev
 ```
 
 Smoke test:

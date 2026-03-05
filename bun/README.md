@@ -34,11 +34,11 @@ cd /Users/vorcigernix/Dev/symphony/bun
 bun install
 ```
 
-2. Start with the included test workflow (memory tracker).
+2. Start in development mode using the default workflow at `./WORKFLOW.md`.
 
 ```bash
 cd /Users/vorcigernix/Dev/symphony/bun
-bun run src/cli.ts ./WORKFLOW.test.md --port 8789
+bun dev
 ```
 
 3. Open the status endpoints.
@@ -51,7 +51,23 @@ curl -s -X POST http://127.0.0.1:8789/api/v1/refresh | jq .
 4. Optional: open the dashboard at
 `http://127.0.0.1:8789/`.
 
-CLI usage:
+Run modes:
+
+```bash
+cd /Users/vorcigernix/Dev/symphony/bun
+bun dev   # NODE_ENV=development
+bun prod  # NODE_ENV=production
+```
+
+Both commands start `src/cli.ts` with the default config file `./WORKFLOW.md`.
+
+If you need a different workflow or port, pass CLI args after `--`:
+
+```bash
+bun run prod -- /absolute/path/to/WORKFLOW.md --port 8790
+```
+
+Raw CLI usage:
 
 ```bash
 bun run src/cli.ts [--port <port>] [path-to-WORKFLOW.md]
@@ -117,6 +133,8 @@ Description:
 {{ issue.description }}
 {% if attempt %}Continuation attempt {{ attempt }}.{% endif %}
 ```
+
+`./WORKFLOW.md` is included in this directory and is valid for both `bun dev` and `bun prod`.
 
 ## Configuration Reference
 
