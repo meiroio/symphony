@@ -1,0 +1,5 @@
+# Bun dependencies
+bun/node_modules/
+
+# Common local artifacts
+.DS_Store

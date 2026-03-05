@@ -9,30 +9,21 @@ on:
 jobs:
   make-all:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: elixir
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up mise tools
-        uses: jdx/mise-action@v3
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          install: true
-          cache: true
-          working_directory: elixir
+          bun-version: latest
 
-      - name: Cache deps and build
-        uses: actions/cache@v4
-        with:
-          path: |
-            elixir/deps
-            elixir/_build
-          key: ${{ runner.os }}-mix-${{ hashFiles('elixir/mix.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-mix-
+      - name: Install dependencies
+        run: cd bun && bun install --frozen-lockfile
 
-      - name: Verify make all
-        run: make all
+      - name: Typecheck
+        run: cd bun && bun run typecheck
+
+      - name: Run tests
+        run: cd bun && bun test
