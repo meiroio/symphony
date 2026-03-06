@@ -30,20 +30,6 @@ Tell your favorite coding agent to build Symphony in a programming language of y
 Check out [bun/README.md](bun/README.md) for instructions on how to set up your environment
 and run the Bun-based Symphony implementation in this repository.
 
-Quick start:
-
-```bash
-cd bun
-bun install
-bun dev
-```
-
-Smoke test:
-
-```bash
-./bun/scripts/mvp-smoke.sh --workflow ./bun/WORKFLOW.test.md --port 8789
-```
-
 ### Option 3. Use the Elixir implementation as reference only
 
 Check out [elixir/README.md](elixir/README.md) if you want inspiration for behavior or parity

@@ -161,7 +161,7 @@ export const validateDispatchConfig = (config: EffectiveConfig): DispatchValidat
     };
   }
 
-  if (config.tracker.kind !== "linear") {
+  if (config.tracker.kind !== "linear" && config.tracker.kind !== "memory") {
     return {
       ok: false,
       errorCode: "unsupported_tracker_kind",
@@ -169,20 +169,22 @@ export const validateDispatchConfig = (config: EffectiveConfig): DispatchValidat
     };
   }
 
-  if (!config.tracker.apiKey) {
-    return {
-      ok: false,
-      errorCode: "missing_linear_api_token",
-      message: "Linear API token is missing",
-    };
-  }
+  if (config.tracker.kind === "linear") {
+    if (!config.tracker.apiKey) {
+      return {
+        ok: false,
+        errorCode: "missing_linear_api_token",
+        message: "Linear API token is missing",
+      };
+    }
 
-  if (!config.tracker.projectSlug) {
-    return {
-      ok: false,
-      errorCode: "missing_linear_project_slug",
-      message: "Linear project slug is missing",
-    };
+    if (!config.tracker.projectSlug) {
+      return {
+        ok: false,
+        errorCode: "missing_linear_project_slug",
+        message: "Linear project slug is missing",
+      };
+    }
   }
 
   if (!config.codex.command || config.codex.command.trim().length === 0) {

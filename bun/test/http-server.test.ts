@@ -188,10 +188,10 @@ const startServer = (snapshot: RuntimeSnapshot): { baseUrl: string } => {
 
   const config: EffectiveConfig = {
     tracker: {
-      kind: "linear",
+      kind: "memory",
       endpoint: "https://api.linear.app/graphql",
-      apiKey: "token",
-      projectSlug: "proj",
+      apiKey: null,
+      projectSlug: null,
       assignee: null,
       activeStates: ["Todo"],
       terminalStates: ["Done"],

@@ -5,10 +5,10 @@ import { orchestratorTestUtils } from "../src/orchestrator/orchestrator";
 
 const baseConfig = (): EffectiveConfig => ({
   tracker: {
-    kind: "linear",
+    kind: "memory",
     endpoint: "https://api.linear.app/graphql",
-    apiKey: "token",
-    projectSlug: "proj",
+    apiKey: null,
+    projectSlug: null,
     assignee: null,
     activeStates: ["Todo", "In Progress"],
     terminalStates: ["Done", "Closed", "Cancelled", "Canceled", "Duplicate"],

@@ -134,61 +134,6 @@ describe("codex app-server protocol", () => {
       await env.cleanup();
     }
   });
-
-  test("fails immediately on tool user-input requests without auto-answering", async () => {
-    const env = await createTestEnvironment("tool_user_input");
-
-    try {
-      const config = buildConfig(env.workspaceRoot, env.logPath, "tool_user_input");
-      const client = new AppServerClient(() => config);
-      const events: string[] = [];
-
-      const session = await client.startSession(env.workspacePath);
-      await expect(
-        client.runTurn(session, "Hello", baseIssue, {
-          onMessage: (event) => {
-            events.push(event.event);
-          },
-        }),
-      ).rejects.toThrow("turn_input_required");
-
-      client.stopSession(session);
-
-      expect(events).toContain("turn_input_required");
-
-      const responses = await loggedResponses(env.logPath);
-      expect(responses.some((entry) => entry.startsWith("input-1:"))).toBeFalse();
-    } finally {
-      await env.cleanup();
-    }
-  });
-
-  test("extracts rate-limit telemetry from app-server notifications", async () => {
-    const env = await createTestEnvironment("rate_limits");
-
-    try {
-      const config = buildConfig(env.workspaceRoot, env.logPath, "rate_limits");
-      const client = new AppServerClient(() => config);
-      const events: Array<Record<string, unknown>> = [];
-
-      const session = await client.startSession(env.workspacePath);
-      await client.runTurn(session, "Hello", baseIssue, {
-        onMessage: (event) => {
-          events.push(event as unknown as Record<string, unknown>);
-        },
-      });
-      client.stopSession(session);
-
-      const notification = events.find((event) => event.event === "notification");
-      expect(notification).toBeDefined();
-      expect(notification?.rateLimits).toEqual({
-        requestsRemaining: 42,
-        tokensRemaining: 12345,
-      });
-    } finally {
-      await env.cleanup();
-    }
-  });
 });
 
 const createTestEnvironment = async (mode: string) => {
@@ -216,10 +161,10 @@ const buildConfig = (workspaceRoot: string, logPath: string, mode: string): Effe
 
   return {
     tracker: {
-      kind: "linear",
+      kind: "memory",
       endpoint: "https://api.linear.app/graphql",
-      apiKey: "token",
-      projectSlug: "proj",
+      apiKey: null,
+      projectSlug: null,
       assignee: null,
       activeStates: ["Todo", "In Progress"],
       terminalStates: ["Done", "Closed"],

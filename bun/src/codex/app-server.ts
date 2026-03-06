@@ -6,6 +6,9 @@ const INITIALIZE_ID = 1;
 const THREAD_START_ID = 2;
 const TURN_START_ID = 3;
 
+const NON_INTERACTIVE_TOOL_INPUT_ANSWER =
+  "This is a non-interactive session. Operator input is unavailable.";
+
 interface JsonRpcResponse {
   id?: unknown;
   result?: unknown;
@@ -159,7 +162,6 @@ export class AppServerClient {
 
       const payload = message.payload;
       const method = asString(payload.method);
-      const rateLimits = extractRateLimits(payload);
 
       if (method === "turn/completed") {
         onMessage({
@@ -169,7 +171,6 @@ export class AppServerClient {
           payload,
           raw: payload,
           usage: asRecord(payload.usage),
-          ...(rateLimits ? { rateLimits } : {}),
           codexAppServerPid: session.codexAppServerPid ?? undefined,
         });
 
@@ -187,7 +188,6 @@ export class AppServerClient {
           sessionId,
           payload,
           raw: payload,
-          ...(rateLimits ? { rateLimits } : {}),
           codexAppServerPid: session.codexAppServerPid ?? undefined,
         });
 
@@ -201,7 +201,6 @@ export class AppServerClient {
           sessionId,
           payload,
           raw: payload,
-          ...(rateLimits ? { rateLimits } : {}),
           codexAppServerPid: session.codexAppServerPid ?? undefined,
         });
 
@@ -234,7 +233,6 @@ export class AppServerClient {
         payload,
         raw: payload,
         usage: asRecord(payload.usage),
-        ...(rateLimits ? { rateLimits } : {}),
         codexAppServerPid: session.codexAppServerPid ?? undefined,
       });
     }
@@ -294,15 +292,31 @@ export class AppServerClient {
     }
 
     if (method === "item/tool/requestUserInput") {
-      const rateLimits = extractRateLimits(payload);
-      onMessage({
-        event: "turn_input_required",
-        timestamp: new Date(),
-        sessionId,
-        payload,
-        ...(rateLimits ? { rateLimits } : {}),
-        codexAppServerPid: session.codexAppServerPid ?? undefined,
-      });
+      const id = payload.id;
+      const params = asRecord(payload.params);
+
+      if (id !== undefined) {
+        const fallbackAnswers = buildUnavailableAnswers(params);
+
+        if (fallbackAnswers) {
+          await this.sendMessage(session.process, {
+            id,
+            result: {
+              answers: fallbackAnswers,
+            },
+          });
+
+          onMessage({
+            event: "tool_input_auto_answered",
+            timestamp: new Date(),
+            sessionId,
+            payload,
+            codexAppServerPid: session.codexAppServerPid ?? undefined,
+          });
+
+          return "handled";
+        }
+      }
 
       return "turn_input_required";
     }
@@ -317,7 +331,6 @@ export class AppServerClient {
       const toolName =
         asString(params.tool) ?? asString(params.name) ?? asString(asRecord(params.tool).name);
       const argumentsPayload = params.arguments ?? params.input ?? {};
-      const rateLimits = extractRateLimits(payload);
 
       const result = await executeDynamicTool(toolName, argumentsPayload, this.configProvider());
 
@@ -336,7 +349,6 @@ export class AppServerClient {
         timestamp: new Date(),
         sessionId,
         payload,
-        ...(rateLimits ? { rateLimits } : {}),
         codexAppServerPid: session.codexAppServerPid ?? undefined,
       });
 
@@ -344,13 +356,11 @@ export class AppServerClient {
     }
 
     if (method.startsWith("turn/") && needsInput(payload)) {
-      const rateLimits = extractRateLimits(payload);
       onMessage({
         event: "turn_input_required",
         timestamp: new Date(),
         sessionId,
         payload,
-        ...(rateLimits ? { rateLimits } : {}),
         codexAppServerPid: session.codexAppServerPid ?? undefined,
       });
 
@@ -624,50 +634,28 @@ const needsInput = (payload: JsonRpcResponse): boolean => {
   );
 };
 
-const extractRateLimits = (payload: JsonRpcResponse): Record<string, unknown> | undefined => {
-  const directCandidates = [
-    asRecord((payload as Record<string, unknown>).rateLimits),
-    asRecord((payload as Record<string, unknown>).rate_limits),
-    asRecord(asRecord(payload.params).rateLimits),
-    asRecord(asRecord(payload.params).rate_limits),
-  ];
-
-  for (const candidate of directCandidates) {
-    if (Object.keys(candidate).length > 0) {
-      return candidate;
-    }
+const buildUnavailableAnswers = (
+  params: Record<string, unknown>,
+): Record<string, { answers: string[] }> | null => {
+  const questions = Array.isArray(params.questions) ? params.questions : null;
+  if (!questions || questions.length === 0) {
+    return null;
   }
 
-  const nestedPaths = [
-    ["params", "msg", "payload", "rateLimits"],
-    ["params", "msg", "payload", "rate_limits"],
-    ["params", "msg", "rateLimits"],
-    ["params", "msg", "rate_limits"],
-    ["msg", "payload", "rateLimits"],
-    ["msg", "payload", "rate_limits"],
-  ];
+  const answers: Record<string, { answers: string[] }> = {};
 
-  for (const path of nestedPaths) {
-    const resolved = mapAtPath(payload as Record<string, unknown>, path);
-    if (resolved && typeof resolved === "object" && !Array.isArray(resolved)) {
-      return resolved as Record<string, unknown>;
-    }
-  }
-
-  return undefined;
-};
-
-const mapAtPath = (value: Record<string, unknown>, path: string[]): unknown => {
-  let current: unknown = value;
-  for (const key of path) {
-    if (!current || typeof current !== "object" || Array.isArray(current)) {
+  for (const question of questions) {
+    const questionId = asString(asRecord(question).id);
+    if (!questionId) {
       return null;
     }
 
-    current = (current as Record<string, unknown>)[key];
+    answers[questionId] = {
+      answers: [NON_INTERACTIVE_TOOL_INPUT_ANSWER],
+    };
   }
 
-  return current;
+  return answers;
 };
 
 const logStreamLine = (streamLabel: string, line: string): void => {

@@ -20,7 +20,7 @@ bun run typecheck
 bun test
 ```
 
-## 2. Fast Local Smoke (HTTP contract)
+## 2. Fast Local Smoke (memory tracker)
 
 Run the automated endpoint smoke test:
 
@@ -36,11 +36,6 @@ Pass criteria:
 - `POST /api/v1/state` returns `405`
 - unknown route returns `404`
 - script exits with `Endpoint contract checks passed`
-
-Notes:
-
-- `WORKFLOW.test.md` intentionally uses dummy Linear credentials.
-- During smoke, tracker fetches can fail and log warnings; that is expected for this check.
 
 ## 3. Real Linear + Codex Smoke (required before MVP signoff)
 
@@ -135,5 +130,5 @@ MVP can be considered test-complete when all are true:
 
 - `bun run typecheck` passes
 - `bun test` passes
-- HTTP contract smoke script passes
+- memory smoke script passes
 - real Linear+Codex smoke pass criteria are met at least once on a test project

@@ -1,12 +1,19 @@
-import type { EffectiveConfig, TrackerAdapter } from "../types";
+import type { EffectiveConfig, Issue, TrackerAdapter } from "../types";
+import { MemoryTracker } from "./memory-tracker";
 import { LinearClient } from "./linear-client";
 
-export interface TrackerFactoryOptions {}
+export interface TrackerFactoryOptions {
+  memoryIssues?: Issue[];
+}
 
 export const createTracker = (
   config: EffectiveConfig,
-  _options: TrackerFactoryOptions = {},
+  options: TrackerFactoryOptions = {},
 ): TrackerAdapter => {
+  if (config.tracker.kind === "memory") {
+    return new MemoryTracker(options.memoryIssues ?? []);
+  }
+
   const linear = new LinearClient({
     endpoint: config.tracker.endpoint,
     apiKey: config.tracker.apiKey,

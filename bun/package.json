@@ -3,10 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "NODE_ENV=development bun run src/cli.ts",
-    "prod": "NODE_ENV=production bun run src/cli.ts",
-    "linear:local": "NODE_ENV=production bun run src/cli.ts ./WORKFLOW.linear.local.md",
-    "start": "bun run prod",
+    "dev": "bun run src/cli.ts",
+    "start": "bun run src/cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "check:pr-body": "bun run scripts/check-pr-body.ts"

@@ -231,26 +231,10 @@ export class WorkspaceManager {
     clearTimeout(timeout);
 
     if (timedOut) {
-      const output = truncate(`${stdoutText}\n${stderrText}`.trim());
-
-      if (failOnError) {
-        throw new SymphonyError("workspace_hook_timeout", `Workspace hook timed out: ${hookName}`, {
-          hook: hookName,
-          timeoutMs,
-          output,
-        });
-      }
-
-      logger.warn("Workspace hook timed out and was ignored", {
+      throw new SymphonyError("workspace_hook_timeout", `Workspace hook timed out: ${hookName}`, {
         hook: hookName,
-        issue_id: issue.issueId,
-        issue_identifier: issue.issueIdentifier,
-        workspace,
-        timeout_ms: timeoutMs,
-        output,
+        timeoutMs,
       });
-
-      return;
     }
 
     if (exitCode !== 0) {

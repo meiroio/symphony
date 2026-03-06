@@ -1,17 +1,6 @@
 ---
 tracker:
-  kind: linear
-  project_slug: "smoke-test-project"
-  api_key: "smoke-test-token"
-  active_states:
-    - Todo
-    - In Progress
-  terminal_states:
-    - Done
-    - Closed
-    - Cancelled
-    - Canceled
-    - Duplicate
+  kind: memory
 polling:
   interval_ms: 3000
 workspace:
