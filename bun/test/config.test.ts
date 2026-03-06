@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { resolve } from "node:path";
 
 import { resolveConfig, validateDispatchConfig } from "../src/config/config";
 import type { WorkflowDefinition } from "../src/types";
@@ -79,7 +80,7 @@ describe("config", () => {
     expect(result.ok).toBeFalse();
     expect(result.errorCode).toBe("missing_linear_api_token");
 
-    const valid = resolveConfig(
+    const unsupported = resolveConfig(
       workflow({
         tracker: {
           kind: "memory",
@@ -88,6 +89,49 @@ describe("config", () => {
       {},
     );
 
-    expect(validateDispatchConfig(valid)).toEqual({ ok: true });
+    const unsupportedResult = validateDispatchConfig(unsupported);
+    expect(unsupportedResult.ok).toBeFalse();
+    expect(unsupportedResult.errorCode).toBe("unsupported_tracker_kind");
+  });
+
+  test("expands env-backed and home-based workspace roots", () => {
+    const envBacked = resolveConfig(
+      workflow({
+        workspace: {
+          root: "$WS_ROOT",
+        },
+      }),
+      {
+        WS_ROOT: "relative-workspaces",
+      },
+    );
+
+    expect(envBacked.workspace.root).toBe("relative-workspaces");
+
+    const homeBacked = resolveConfig(
+      workflow({
+        workspace: {
+          root: "~/symphony-workspaces",
+        },
+      }),
+      {
+        HOME: "/tmp/home-user",
+      },
+    );
+
+    expect(homeBacked.workspace.root).toBe(resolve("/tmp/home-user", "symphony-workspaces"));
+  });
+
+  test("preserves codex.command shell string", () => {
+    const config = resolveConfig(
+      workflow({
+        codex: {
+          command: "codex app-server --profile 'dev profile'",
+        },
+      }),
+      {},
+    );
+
+    expect(config.codex.command).toBe("codex app-server --profile 'dev profile'");
   });
 });

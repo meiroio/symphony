@@ -18,7 +18,7 @@ const send = (payload: Record<string, unknown>): void => {
 };
 
 let phase: "await_initialize" | "await_initialized" | "await_thread_start" | "await_turn_start" | "await_runtime_response" = "await_initialize";
-let expectedRuntimeResponse: "approval" | "tool" | null = null;
+let expectedRuntimeResponse: "approval" | "tool" | "tool_user_input" | null = null;
 let turnCount = 0;
 
 const failTurn = (reason: string): void => {
@@ -68,6 +68,39 @@ const onTurnStart = (msg: Record<string, unknown>): void => {
     return;
   }
 
+  if (mode === "tool_user_input") {
+    send({
+      method: "item/tool/requestUserInput",
+      id: "input-1",
+      params: {
+        questions: [
+          {
+            id: "missing-context",
+            question: "Need additional input?",
+          },
+        ],
+      },
+    });
+    expectedRuntimeResponse = "tool_user_input";
+    phase = "await_runtime_response";
+    return;
+  }
+
+  if (mode === "rate_limits") {
+    send({
+      method: "thread/rateLimits/updated",
+      params: {
+        rateLimits: {
+          requestsRemaining: 42,
+          tokensRemaining: 12345,
+        },
+      },
+    });
+    send({ method: "turn/completed", params: {} });
+    phase = "await_turn_start";
+    return;
+  }
+
   if (mode === "input_required") {
     send({
       method: "turn/input_required",
@@ -113,6 +146,15 @@ const onRuntimeResponse = (msg: Record<string, unknown>): void => {
       failTurn("invalid tool response");
     }
 
+    expectedRuntimeResponse = null;
+    phase = "await_turn_start";
+    return;
+  }
+
+  if (expectedRuntimeResponse === "tool_user_input") {
+    const responseId = msg.id;
+    log(`response:${String(responseId)}:tool_user_input`);
+    send({ method: "turn/completed", params: {} });
     expectedRuntimeResponse = null;
     phase = "await_turn_start";
     return;

@@ -559,6 +559,7 @@ export class Orchestrator {
       logger.info("Agent task cancelled", {
         issue_id: issueId,
         issue_identifier: runningEntry.identifier,
+        session_id: runningEntry.sessionId,
       });
       this.notifyUpdate();
       return;
@@ -574,6 +575,7 @@ export class Orchestrator {
     logger.warn("Agent task exited with error; scheduling retry", {
       issue_id: issueId,
       issue_identifier: runningEntry.identifier,
+      session_id: runningEntry.sessionId,
       reason,
     });
 

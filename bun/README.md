@@ -8,7 +8,7 @@ This directory contains the Bun/TypeScript Symphony implementation based on
 - `WORKFLOW.md` loader (YAML front matter + prompt body)
 - Last-known-good workflow reload store
 - Typed config layer with defaults
-- Linear tracker adapter and memory tracker adapter
+- Linear tracker adapter
 - Orchestrator loop (poll, dispatch, reconcile, retry, snapshot)
 - Workspace manager with hook support
 - Codex app-server client
@@ -34,21 +34,27 @@ cd /Users/vorcigernix/Dev/symphony/bun
 bun install
 ```
 
-2. Start in development mode using the default workflow at `./WORKFLOW.md`.
+2. Export your Linear token.
+
+```bash
+export LINEAR_API_KEY="<your-token>"
+```
+
+3. Start in development mode using the default workflow at `./WORKFLOW.md`.
 
 ```bash
 cd /Users/vorcigernix/Dev/symphony/bun
 bun dev
 ```
 
-3. Open the status endpoints.
+4. Open the status endpoints.
 
 ```bash
 curl -s http://127.0.0.1:8789/api/v1/state | jq .
 curl -s -X POST http://127.0.0.1:8789/api/v1/refresh | jq .
 ```
 
-4. Optional: open the dashboard at
+5. Optional: open the dashboard at
 `http://127.0.0.1:8789/`.
 
 Run modes:
@@ -82,23 +88,6 @@ Your workflow file contains:
 
 - YAML front matter with runtime config
 - Prompt body rendered with Liquid variables
-
-Minimal memory workflow:
-
-```md
----
-tracker:
-  kind: memory
-polling:
-  interval_ms: 3000
-workspace:
-  root: /tmp/symphony-bun-workspaces
-server:
-  port: 8789
----
-You are working on issue {{ issue.identifier }}.
-Title: {{ issue.title }}
-```
 
 Minimal Linear workflow:
 
@@ -135,6 +124,17 @@ Description:
 ```
 
 `./WORKFLOW.md` is included in this directory and is valid for both `bun dev` and `bun prod`.
+For Linear runs in this repo:
+
+- tracked template: `./WORKFLOW.linear.example.md`
+- local tokened file (git-ignored): `./WORKFLOW.linear.local.md`
+
+Run the local tokened workflow:
+
+```bash
+cd /Users/vorcigernix/Dev/symphony/bun
+bun run linear:local
+```
 
 ## Configuration Reference
 
@@ -142,10 +142,10 @@ All keys live in the YAML front matter of `WORKFLOW.md`.
 
 | Key | Default | Notes |
 | --- | --- | --- |
-| `tracker.kind` | none | Required. `linear` or `memory`. |
-| `tracker.endpoint` | `https://api.linear.app/graphql` | Used for Linear mode. |
-| `tracker.api_key` | `$LINEAR_API_KEY` fallback | Required in Linear mode. Supports `$ENV_VAR`. |
-| `tracker.project_slug` | none | Required in Linear mode. |
+| `tracker.kind` | none | Required. Must be `linear` for runtime dispatch. |
+| `tracker.endpoint` | `https://api.linear.app/graphql` | Linear GraphQL endpoint. |
+| `tracker.api_key` | `$LINEAR_API_KEY` fallback | Required. Supports `$ENV_VAR`. |
+| `tracker.project_slug` | none | Required. |
 | `tracker.assignee` | `$LINEAR_ASSIGNEE` fallback | Optional. `"me"` resolves viewer id from Linear token. |
 | `tracker.active_states` | `Todo`, `In Progress` | Array or CSV string. |
 | `tracker.terminal_states` | `Closed`, `Cancelled`, `Canceled`, `Duplicate`, `Done` | Used for reconciliation and cleanup. |
@@ -177,12 +177,15 @@ Notes:
 
 ## Smoke Test
 
-Fast smoke test (memory tracker + HTTP contract checks):
+Fast smoke test (linear validation + HTTP contract checks):
 
 ```bash
 cd /Users/vorcigernix/Dev/symphony
 ./bun/scripts/mvp-smoke.sh --workflow ./bun/WORKFLOW.test.md --port 8789
 ```
+
+`WORKFLOW.test.md` uses dummy Linear credentials so the service can start without a real token.
+Tracker calls are expected to fail and log warnings during this smoke check.
 
 Options:
 

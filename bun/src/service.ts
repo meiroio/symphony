@@ -1,4 +1,3 @@
-import type { Issue } from "./types";
 import { WorkflowStore } from "./config/workflow-store";
 import { resolveConfig, validateDispatchConfig } from "./config/config";
 import { Orchestrator } from "./orchestrator/orchestrator";
@@ -8,7 +7,6 @@ import { logger } from "./utils/logger";
 export interface SymphonyServiceOptions {
   workflowPath?: string;
   serverPortOverride?: number | null;
-  trackerMemoryIssues?: Issue[];
 }
 
 export class SymphonyService {
@@ -16,20 +14,15 @@ export class SymphonyService {
   private readonly serverPortOverride: number | null;
   private readonly orchestrator: Orchestrator;
   private readonly httpServer: HttpServer;
-  private readonly trackerMemoryIssues: Issue[];
   private started = false;
 
   constructor(options: SymphonyServiceOptions = {}) {
     this.workflowStore = new WorkflowStore(options.workflowPath);
     this.serverPortOverride = options.serverPortOverride ?? null;
-    this.trackerMemoryIssues = options.trackerMemoryIssues ?? [];
 
     this.orchestrator = new Orchestrator({
       workflowStore: this.workflowStore,
       serverPortOverride: this.serverPortOverride,
-      trackerOptions: {
-        memoryIssues: this.trackerMemoryIssues,
-      },
     });
 
     this.httpServer = new HttpServer({

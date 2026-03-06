@@ -13,11 +13,11 @@ tracker:
     - Canceled
     - Duplicate
 polling:
-  interval_ms: 30000
+  interval_ms: 5000
 workspace:
   root: /tmp/symphony-bun-workspaces
 agent:
-  max_concurrent_agents: 2
+  max_concurrent_agents: 1
   max_turns: 20
 codex:
   command: codex app-server
@@ -27,7 +27,7 @@ codex:
     type: workspaceWrite
 server:
   host: 127.0.0.1
-  port: 8789
+  port: 8790
 ---
 You are working on issue {{ issue.identifier }}.
 
@@ -36,6 +36,10 @@ Title: {{ issue.title }}
 {% if issue.description %}
 Description:
 {{ issue.description }}
+{% endif %}
+
+{% if attempt %}
+Continuation attempt {{ attempt }}.
 {% endif %}
 
 Work only inside the provided workspace.
