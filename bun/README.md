@@ -76,6 +76,7 @@ Workflow file:
 - Copy it to `./WORKFLOW.linear.local.md` and fill in your project slug/token setup.
 - Use `./WORKFLOW.linear.local.md` (git-ignored).
 - Do not commit tokens; keep secrets local.
+- Configure `repositories` so each issue workspace clones the correct repo(s) automatically.
 
 ```bash
 cd /Users/vorcigernix/Dev/symphony/bun
@@ -90,6 +91,9 @@ Notes:
   token in the same shell before starting the service.
 - For full MVP verification details, use
   [`docs/mvp-manual-test.md`](./docs/mvp-manual-test.md).
+- `repositories` entries are cloned on workspace creation, so the agent works in a deterministic repo layout.
+- On subsequent runs for the same workspace, Symphony attempts `git fetch` + `git pull --ff-only` for configured repositories when the working tree is clean.
+- If a repository has local changes, pull is skipped for safety and work continues with current workspace state.
 
 ## Manual MVP Validation
 

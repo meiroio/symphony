@@ -1,7 +1,7 @@
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 
-import type { EffectiveConfig, WorkflowDefinition } from "../types";
+import type { EffectiveConfig, RepositoryConfig, WorkflowDefinition } from "../types";
 import {
   normalizeIssueState,
   parseCsvStringOrArray,
@@ -65,6 +65,7 @@ export const resolveConfig = (
   const agent = asRecord(config.agent);
   const codex = asRecord(config.codex);
   const server = asRecord(config.server);
+  const repositories = normalizeRepositories(config.repositories, env);
 
   const activeStates = parseCsvStringOrArray(tracker.active_states) ?? DEFAULT_ACTIVE_STATES;
   const terminalStates = parseCsvStringOrArray(tracker.terminal_states) ?? DEFAULT_TERMINAL_STATES;
@@ -117,6 +118,7 @@ export const resolveConfig = (
     workspace: {
       root: resolvedWorkspaceRoot,
     },
+    repositories,
     hooks: {
       afterCreate: normalizeHookScript(hooks.after_create),
       beforeRun: normalizeHookScript(hooks.before_run),
@@ -388,4 +390,64 @@ const envReferenceName = (value: string): string | null => {
   }
 
   return null;
+};
+
+const normalizeRepositories = (
+  value: unknown,
+  env: NodeJS.ProcessEnv,
+): RepositoryConfig[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const parsed: RepositoryConfig[] = [];
+
+  for (let index = 0; index < value.length; index += 1) {
+    const raw = asRecord(value[index]);
+    const remote = resolveEnvBackedSecret(raw.remote, env, null);
+
+    if (!remote) {
+      continue;
+    }
+
+    const rawId = normalizeNonEmptyString(raw.id);
+    const id = rawId ?? `repo_${index + 1}`;
+    const checkout = normalizeNonEmptyString(raw.checkout) ?? "main";
+    const target = normalizeRepositoryTarget(resolveEnvBackedSecret(raw.target, env, ".") ?? ".");
+    const primary = raw.primary === true;
+
+    parsed.push({
+      id,
+      remote,
+      checkout,
+      target,
+      primary,
+    });
+  }
+
+  if (parsed.length === 0) {
+    return [];
+  }
+
+  const firstPrimaryIndex = parsed.findIndex((repository) => repository.primary);
+  const normalizedPrimaryIndex = firstPrimaryIndex >= 0 ? firstPrimaryIndex : 0;
+
+  return parsed.map((repository, index) => ({
+    ...repository,
+    primary: index === normalizedPrimaryIndex,
+  }));
+};
+
+const normalizeRepositoryTarget = (value: unknown): string => {
+  const asString = normalizeValueToString(value);
+  if (asString === null) {
+    return ".";
+  }
+
+  const trimmed = asString.trim();
+  if (trimmed.length === 0) {
+    return ".";
+  }
+
+  return trimmed;
 };

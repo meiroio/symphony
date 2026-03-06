@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { access, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 
 import { WorkspaceManager } from "../src/workspace/workspace-manager";
 import type { EffectiveConfig } from "../src/types";
@@ -48,6 +48,22 @@ const buildConfig = (workspaceRoot: string, hooks: Partial<EffectiveConfig["hook
   promptTemplate: "Prompt",
 });
 
+const runCommand = (args: string[], cwd: string): string => {
+  const result = Bun.spawnSync(args, {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const stdout = result.stdout.toString();
+  const stderr = result.stderr.toString();
+
+  if (result.exitCode !== 0) {
+    throw new Error(`Command failed (${args.join(" ")}): ${stderr || stdout}`);
+  }
+
+  return stdout.trim();
+};
+
 describe("workspace manager", () => {
   test("creates deterministic sanitized workspace path", async () => {
     const root = join(tmpdir(), `symphony-workspace-${Date.now()}-${Math.random()}`);
@@ -88,6 +104,110 @@ describe("workspace manager", () => {
       expect(second).toBe("changed");
     } finally {
       await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("bootstraps repositories declared in workflow config", async () => {
+    const root = join(tmpdir(), `symphony-workspace-repo-${Date.now()}-${Math.random()}`);
+    const fixture = join(tmpdir(), `symphony-workspace-fixture-${Date.now()}-${Math.random()}`);
+    const sourceRepo = join(fixture, "source-repo");
+    const remoteRepo = join(fixture, "remote.git");
+    const issueIdentifier = "MT-Repo";
+
+    await rm(root, { recursive: true, force: true });
+    await rm(fixture, { recursive: true, force: true });
+
+    try {
+      await mkdir(sourceRepo, { recursive: true });
+
+      runCommand(["git", "init"], sourceRepo);
+      runCommand(["git", "config", "user.email", "bot@example.com"], sourceRepo);
+      runCommand(["git", "config", "user.name", "Symphony Bot"], sourceRepo);
+      runCommand(["git", "checkout", "-b", "main"], sourceRepo);
+      await writeFile(join(sourceRepo, "README.md"), "fixture\n", "utf8");
+      runCommand(["git", "add", "README.md"], sourceRepo);
+      runCommand(["git", "commit", "-m", "init"], sourceRepo);
+      runCommand(["git", "clone", "--bare", sourceRepo, remoteRepo], fixture);
+
+      const config: EffectiveConfig = {
+        ...buildConfig(root),
+        repositories: [
+          {
+            id: "app",
+            remote: remoteRepo,
+            checkout: "main",
+            target: ".",
+            primary: true,
+          },
+        ],
+      };
+
+      const manager = new WorkspaceManager(() => config);
+      const workspace = await manager.createForIssue(issueIdentifier);
+
+      await access(join(workspace, ".git"));
+      const readme = await readFile(join(workspace, "README.md"), "utf8");
+      expect(readme.trim()).toBe("fixture");
+
+      const branch = runCommand(["git", "rev-parse", "--abbrev-ref", "HEAD"], workspace);
+      expect(branch).toBe("main");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(fixture, { recursive: true, force: true });
+    }
+  });
+
+  test("syncs existing clean repository via git pull on repeated workspace start", async () => {
+    const root = join(tmpdir(), `symphony-workspace-sync-${Date.now()}-${Math.random()}`);
+    const fixture = join(tmpdir(), `symphony-workspace-sync-fixture-${Date.now()}-${Math.random()}`);
+    const sourceRepo = join(fixture, "source-repo");
+    const remoteRepo = join(fixture, "remote.git");
+    const issueIdentifier = "MT-Sync";
+
+    await rm(root, { recursive: true, force: true });
+    await rm(fixture, { recursive: true, force: true });
+
+    try {
+      await mkdir(sourceRepo, { recursive: true });
+
+      runCommand(["git", "init"], sourceRepo);
+      runCommand(["git", "config", "user.email", "bot@example.com"], sourceRepo);
+      runCommand(["git", "config", "user.name", "Symphony Bot"], sourceRepo);
+      runCommand(["git", "checkout", "-b", "main"], sourceRepo);
+
+      await writeFile(join(sourceRepo, "README.md"), "v1\n", "utf8");
+      runCommand(["git", "add", "README.md"], sourceRepo);
+      runCommand(["git", "commit", "-m", "init"], sourceRepo);
+      runCommand(["git", "clone", "--bare", sourceRepo, remoteRepo], fixture);
+
+      const config: EffectiveConfig = {
+        ...buildConfig(root),
+        repositories: [
+          {
+            id: "app",
+            remote: remoteRepo,
+            checkout: "main",
+            target: ".",
+            primary: true,
+          },
+        ],
+      };
+
+      const manager = new WorkspaceManager(() => config);
+      const workspace = await manager.createForIssue(issueIdentifier);
+      expect((await readFile(join(workspace, "README.md"), "utf8")).trim()).toBe("v1");
+
+      await writeFile(join(sourceRepo, "README.md"), "v2\n", "utf8");
+      runCommand(["git", "add", "README.md"], sourceRepo);
+      runCommand(["git", "commit", "-m", "update"], sourceRepo);
+      runCommand(["git", "push", remoteRepo, "main"], sourceRepo);
+
+      await manager.createForIssue(issueIdentifier);
+
+      expect((await readFile(join(workspace, "README.md"), "utf8")).trim()).toBe("v2");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(fixture, { recursive: true, force: true });
     }
   });
 });

@@ -60,6 +60,12 @@ polling:
   interval_ms: 5000
 workspace:
   root: /tmp/symphony-bun-workspaces
+repositories:
+  - id: app
+    remote: "<your-repository-ssh-or-https-url>"
+    checkout: main
+    target: .
+    primary: true
 agent:
   max_concurrent_agents: 1
   max_turns: 3

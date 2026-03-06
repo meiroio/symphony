@@ -27,6 +27,14 @@ export interface WorkflowDefinition {
   promptTemplate: string;
 }
 
+export interface RepositoryConfig {
+  id: string;
+  remote: string;
+  checkout: string;
+  target: string;
+  primary: boolean;
+}
+
 export interface HookConfig {
   afterCreate: string | null;
   beforeRun: string | null;
@@ -79,6 +87,7 @@ export interface EffectiveConfig {
   tracker: TrackerConfig;
   polling: PollingConfig;
   workspace: WorkspaceConfig;
+  repositories?: RepositoryConfig[];
   hooks: HookConfig;
   agent: AgentConfig;
   codex: CodexConfig;

@@ -4,6 +4,7 @@ import { WorkspaceManager } from "../workspace/workspace-manager";
 import { AppServerClient } from "../codex/app-server";
 import { logger } from "../utils/logger";
 import { normalizeIssueState } from "../utils/normalize";
+import { resolve } from "node:path";
 
 export class AgentRunner {
   private readonly workspaceManager: WorkspaceManager;
@@ -67,9 +68,20 @@ export class AgentRunner {
           thread_id: session.threadId,
         });
 
+        const repositories = this.configProvider().repositories ?? [];
         const prompt =
           turnNumber === 1
-            ? await buildPrompt(this.configProvider().promptTemplate, currentIssue, options.attempt)
+            ? `${await buildPrompt(
+                this.configProvider().promptTemplate,
+                currentIssue,
+                options.attempt,
+                {
+                  workspace: {
+                    path: workspace,
+                  },
+                  repositories,
+                },
+              )}\n\n${repositoryPromptContext(workspace, repositories)}`
             : continuationPrompt(turnNumber, maxTurns);
 
         const runTurnOptions =
@@ -166,4 +178,21 @@ const continuationPrompt = (turnNumber: number, maxTurns: number): string => {
 - Resume from the current workspace state instead of restarting from scratch.
 - The original task instructions are already in thread history, so do not restate them.
 - Focus on remaining issue work and do not end early unless you are truly blocked.`;
+};
+
+const repositoryPromptContext = (
+  workspace: string,
+  repositories: import("../types").RepositoryConfig[],
+): string => {
+  if (repositories.length === 0) {
+    return "Repository setup:\n- No workflow-configured repositories were declared for this workspace.";
+  }
+
+  const lines = repositories.map((repository) => {
+    const absolutePath = resolve(workspace, repository.target);
+    const primary = repository.primary ? " (primary)" : "";
+    return `- ${repository.id}${primary}: ${absolutePath} [branch: ${repository.checkout}]`;
+  });
+
+  return `Repository setup:\n${lines.join("\n")}`;
 };

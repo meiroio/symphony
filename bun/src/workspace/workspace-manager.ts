@@ -16,6 +16,8 @@ import { sanitizeWorkspaceKey } from "../utils/normalize";
 
 const EXCLUDED_ENTRIES = new Set(["tmp", ".elixir_ls"]);
 const HOOK_LOG_TRUNCATE_BYTES = 2_048;
+const GIT_CLONE_TIMEOUT_MS = 300_000;
+const GIT_SYNC_TIMEOUT_MS = 120_000;
 
 interface IssueContext {
   issueId: string | null;
@@ -37,6 +39,7 @@ export class WorkspaceManager {
     await this.validateWorkspacePath(workspace);
 
     const createdNow = await this.ensureWorkspace(workspace);
+    await this.bootstrapRepositories(workspace, issue);
     if (createdNow) {
       const script = this.configProvider().hooks.afterCreate;
       if (script) {
@@ -45,6 +48,164 @@ export class WorkspaceManager {
     }
 
     return workspace;
+  }
+
+  private async bootstrapRepositories(workspace: string, issue: IssueContext): Promise<void> {
+    const repositories = this.configProvider().repositories ?? [];
+    if (repositories.length === 0) {
+      return;
+    }
+
+    for (const repository of repositories) {
+      const targetPath = this.resolveRepositoryTargetPath(workspace, repository.target);
+      await mkdir(targetPath, { recursive: true });
+
+      const alreadyGitRepo = await this.pathExists(join(targetPath, ".git"));
+      if (alreadyGitRepo) {
+        await this.syncRepository(targetPath, repository, issue);
+        continue;
+      }
+
+      const args = ["git", "clone", "--branch", repository.checkout, repository.remote, targetPath];
+      const result = await this.runCommand(args, workspace, GIT_CLONE_TIMEOUT_MS);
+
+      if (result.exitCode !== 0) {
+        throw new SymphonyError("workspace_repository_clone_failed", "Failed to clone repository", {
+          issue_id: issue.issueId,
+          issue_identifier: issue.issueIdentifier,
+          repository_id: repository.id,
+          remote: repository.remote,
+          target: repository.target,
+          output: truncate(`${result.stdout}\n${result.stderr}`.trim()),
+        });
+      }
+
+      logger.info("Repository cloned for workspace", {
+        issue_id: issue.issueId,
+        issue_identifier: issue.issueIdentifier,
+        repository_id: repository.id,
+        remote: repository.remote,
+        checkout: repository.checkout,
+        target: repository.target,
+        path: targetPath,
+      });
+    }
+  }
+
+  private async syncRepository(
+    targetPath: string,
+    repository: NonNullable<EffectiveConfig["repositories"]>[number],
+    issue: IssueContext,
+  ): Promise<void> {
+    const statusResult = await this.runCommand(["git", "status", "--porcelain"], targetPath, GIT_SYNC_TIMEOUT_MS);
+    if (statusResult.exitCode !== 0) {
+      logger.warn("Repository sync skipped; unable to read git status", {
+        issue_id: issue.issueId,
+        issue_identifier: issue.issueIdentifier,
+        repository_id: repository.id,
+        target: repository.target,
+        path: targetPath,
+        output: truncate(`${statusResult.stdout}\n${statusResult.stderr}`.trim()),
+      });
+      return;
+    }
+
+    if (statusResult.stdout.trim().length > 0) {
+      logger.info("Repository has local changes; skipping git pull", {
+        issue_id: issue.issueId,
+        issue_identifier: issue.issueIdentifier,
+        repository_id: repository.id,
+        target: repository.target,
+        path: targetPath,
+      });
+      return;
+    }
+
+    const fetchResult = await this.runCommand(
+      ["git", "fetch", "--prune", "origin"],
+      targetPath,
+      GIT_SYNC_TIMEOUT_MS,
+    );
+    if (fetchResult.exitCode !== 0) {
+      logger.warn("Repository sync failed during fetch", {
+        issue_id: issue.issueId,
+        issue_identifier: issue.issueIdentifier,
+        repository_id: repository.id,
+        target: repository.target,
+        path: targetPath,
+        output: truncate(`${fetchResult.stdout}\n${fetchResult.stderr}`.trim()),
+      });
+      return;
+    }
+
+    const branchResult = await this.runCommand(
+      ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+      targetPath,
+      GIT_SYNC_TIMEOUT_MS,
+    );
+    if (branchResult.exitCode !== 0) {
+      logger.warn("Repository sync failed; unable to determine current branch", {
+        issue_id: issue.issueId,
+        issue_identifier: issue.issueIdentifier,
+        repository_id: repository.id,
+        target: repository.target,
+        path: targetPath,
+        output: truncate(`${branchResult.stdout}\n${branchResult.stderr}`.trim()),
+      });
+      return;
+    }
+
+    const branchFromHead = branchResult.stdout.trim();
+    const pullBranch = branchFromHead === "HEAD" || branchFromHead.length === 0
+      ? repository.checkout
+      : branchFromHead;
+
+    if (branchFromHead === "HEAD") {
+      const checkoutResult = await this.runCommand(
+        ["git", "checkout", pullBranch],
+        targetPath,
+        GIT_SYNC_TIMEOUT_MS,
+      );
+      if (checkoutResult.exitCode !== 0) {
+        logger.warn("Repository sync failed during detached HEAD checkout", {
+          issue_id: issue.issueId,
+          issue_identifier: issue.issueIdentifier,
+          repository_id: repository.id,
+          target: repository.target,
+          path: targetPath,
+          branch: pullBranch,
+          output: truncate(`${checkoutResult.stdout}\n${checkoutResult.stderr}`.trim()),
+        });
+        return;
+      }
+    }
+
+    const pullResult = await this.runCommand(
+      ["git", "pull", "--ff-only", "origin", pullBranch],
+      targetPath,
+      GIT_SYNC_TIMEOUT_MS,
+    );
+    if (pullResult.exitCode !== 0) {
+      logger.warn("Repository sync failed during pull", {
+        issue_id: issue.issueId,
+        issue_identifier: issue.issueIdentifier,
+        repository_id: repository.id,
+        target: repository.target,
+        path: targetPath,
+        branch: pullBranch,
+        output: truncate(`${pullResult.stdout}\n${pullResult.stderr}`.trim()),
+      });
+      return;
+    }
+
+    logger.info("Repository synced with remote via git pull", {
+      issue_id: issue.issueId,
+      issue_identifier: issue.issueIdentifier,
+      repository_id: repository.id,
+      target: repository.target,
+      path: targetPath,
+      branch: pullBranch,
+    });
   }
 
   async remove(workspace: string): Promise<void> {
@@ -285,6 +446,69 @@ export class WorkspaceManager {
     return {
       issueId: null,
       issueIdentifier: "issue",
+    };
+  }
+
+  private resolveRepositoryTargetPath(workspace: string, target: string): string {
+    if (!target || target.trim().length === 0 || target === ".") {
+      return workspace;
+    }
+
+    const absolute = resolve(workspace, target);
+    if (absolute === workspace) {
+      return workspace;
+    }
+
+    const rel = relative(workspace, absolute);
+
+    if (rel.startsWith("..") || rel === "") {
+      throw new SymphonyError("workspace_repository_target_escape", "Repository target escaped workspace", {
+        workspace,
+        target,
+        resolved: absolute,
+      });
+    }
+
+    return absolute;
+  }
+
+  private async runCommand(
+    args: string[],
+    cwd: string,
+    timeoutMs: number,
+  ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+    const process = Bun.spawn(args, {
+      cwd,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      process.kill();
+    }, timeoutMs);
+
+    const [exitCode, stdout, stderr] = await Promise.all([
+      process.exited,
+      new Response(process.stdout).text().catch(() => ""),
+      new Response(process.stderr).text().catch(() => ""),
+    ]);
+
+    clearTimeout(timer);
+
+    if (timedOut) {
+      throw new SymphonyError("workspace_command_timeout", "Workspace command timed out", {
+        command: args.join(" "),
+        cwd,
+        timeoutMs,
+      });
+    }
+
+    return {
+      exitCode,
+      stdout,
+      stderr,
     };
   }
 

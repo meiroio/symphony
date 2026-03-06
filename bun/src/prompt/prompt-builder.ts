@@ -1,6 +1,7 @@
 import { Liquid } from "liquidjs";
+import { resolve } from "node:path";
 
-import type { Issue } from "../types";
+import type { Issue, RepositoryConfig } from "../types";
 import { SymphonyError } from "../utils/errors";
 
 const engine = new Liquid({
@@ -12,6 +13,7 @@ export const buildPrompt = async (
   templateSource: string,
   issue: Issue,
   attempt: number | null,
+  context?: PromptBuildContext,
 ): Promise<string> => {
   let template;
 
@@ -27,6 +29,13 @@ export const buildPrompt = async (
     const rendered = await engine.render(template, {
       issue: toTemplateValue(issue),
       attempt,
+      workspace: toTemplateValue({ path: context?.workspace?.path ?? "" }),
+      repositories: toTemplateValue(
+        (context?.repositories ?? []).map((repository) => ({
+          ...repository,
+          path: resolve(context?.workspace?.path ?? "", repository.target),
+        })),
+      ),
     });
 
     return rendered;
@@ -61,3 +70,10 @@ const toTemplateValue = (value: unknown): unknown => {
 
   return value;
 };
+
+export interface PromptBuildContext {
+  workspace?: {
+    path: string;
+  };
+  repositories?: RepositoryConfig[];
+}

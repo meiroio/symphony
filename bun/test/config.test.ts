@@ -90,4 +90,50 @@ describe("config", () => {
 
     expect(validateDispatchConfig(valid)).toEqual({ ok: true });
   });
+
+  test("normalizes repositories and selects a single primary repository", () => {
+    const config = resolveConfig(
+      workflow({
+        repositories: [
+          {
+            id: "api",
+            remote: "git@work:acme/api.git",
+            checkout: "develop",
+            target: ".",
+          },
+          {
+            remote: "$DOCS_REMOTE",
+            checkout: "main",
+            target: "deps/docs",
+            primary: true,
+          },
+          {
+            id: "ignored",
+            checkout: "main",
+            target: "missing-remote",
+          },
+        ],
+      }),
+      {
+        DOCS_REMOTE: "git@work:acme/docs.git",
+      },
+    );
+
+    expect(config.repositories).toEqual([
+      {
+        id: "api",
+        remote: "git@work:acme/api.git",
+        checkout: "develop",
+        target: ".",
+        primary: false,
+      },
+      {
+        id: "repo_2",
+        remote: "git@work:acme/docs.git",
+        checkout: "main",
+        target: "deps/docs",
+        primary: true,
+      },
+    ]);
+  });
 });
