@@ -37,6 +37,60 @@ bun test
 bun run typecheck
 ```
 
+## Local Test Flow
+
+Use this sequence when validating local changes before pushing:
+
+1. Install dependencies.
+
+```bash
+cd /Users/vorcigernix/Dev/symphony/bun
+bun install
+```
+
+2. Run static checks and unit tests.
+
+```bash
+cd /Users/vorcigernix/Dev/symphony/bun
+bun run typecheck
+bun test
+```
+
+3. Run the HTTP contract smoke test.
+
+```bash
+cd /Users/vorcigernix/Dev/symphony
+./bun/scripts/mvp-smoke.sh --workflow ./bun/WORKFLOW.test.md --port 8789
+```
+
+4. Run against the real Symphony Linear project.
+
+Project:
+
+- [`Symphony` in Linear](https://linear.app/meiro-io/project/symphony-2f9fcdc281e6/overview)
+- `project_slug`: `symphony-2f9fcdc281e6`
+
+Workflow file:
+
+- Start from `./WORKFLOW.linear.sample.md`.
+- Copy it to `./WORKFLOW.linear.local.md` and fill in your project slug/token setup.
+- Use `./WORKFLOW.linear.local.md` (git-ignored).
+- Do not commit tokens; keep secrets local.
+
+```bash
+cd /Users/vorcigernix/Dev/symphony/bun
+bun run src/cli.ts ./WORKFLOW.linear.local.md --port 8790
+```
+
+Notes:
+
+- `WORKFLOW.test.md` uses dummy Linear credentials, so tracker calls can fail with
+  warnings during smoke; this is expected.
+- If `WORKFLOW.linear.local.md` uses `api_key: "$LINEAR_API_KEY"`, export your
+  token in the same shell before starting the service.
+- For full MVP verification details, use
+  [`docs/mvp-manual-test.md`](./docs/mvp-manual-test.md).
+
 ## Manual MVP Validation
 
 Fast local smoke:

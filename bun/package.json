@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun run src/cli.ts",
+    "linear:local": "bun run src/cli.ts ./WORKFLOW.linear.local.md",
     "start": "bun run src/cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",

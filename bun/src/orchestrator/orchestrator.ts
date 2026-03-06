@@ -10,6 +10,7 @@ import type {
 import { resolveConfig, validateDispatchConfig } from "../config/config";
 import type { WorkflowStore } from "../config/workflow-store";
 import { createTracker, type TrackerFactoryOptions } from "../tracker/tracker";
+import { LinearClient } from "../tracker/linear-client";
 import { WorkspaceManager } from "../workspace/workspace-manager";
 import { AppServerClient } from "../codex/app-server";
 import { AgentRunner } from "../agent/agent-runner";
@@ -91,6 +92,7 @@ export class Orchestrator {
       throw new Error(validation.message ?? validation.errorCode ?? "invalid_config");
     }
 
+    await this.logTrackerConnectionStatus();
     await this.runStartupTerminalCleanup();
 
     this.started = true;
@@ -510,6 +512,12 @@ export class Orchestrator {
     attempt: number | null,
     signal: AbortSignal,
   ): Promise<void> {
+    logger.info("Agent task started", {
+      issue_id: issueId,
+      issue_identifier: issue.identifier,
+      attempt,
+    });
+
     try {
       await this.agentRunner.run(issue, tracker, {
         attempt,
@@ -634,6 +642,17 @@ export class Orchestrator {
       this.codexRateLimits = update.rateLimits;
     }
 
+    if (update.event !== "notification") {
+      logger.info("Codex event received", {
+        issue_id: issueId,
+        issue_identifier: runningEntry.identifier,
+        event: update.event,
+        session_id: update.sessionId ?? runningEntry.sessionId,
+        thread_id: update.threadId,
+        turn_id: update.turnId,
+      });
+    }
+
     this.notifyUpdate();
   }
 
@@ -755,6 +774,54 @@ export class Orchestrator {
       );
     } catch (error) {
       logger.warn("Startup terminal workspace cleanup failed", {
+        reason: String(error),
+      });
+    }
+  }
+
+  private async logTrackerConnectionStatus(): Promise<void> {
+    const config = this.requireConfig();
+
+    if (config.tracker.kind !== "linear") {
+      logger.info("Tracker connection check skipped", {
+        tracker_kind: config.tracker.kind,
+      });
+      return;
+    }
+
+    const client = new LinearClient({
+      endpoint: config.tracker.endpoint,
+      apiKey: config.tracker.apiKey,
+      projectSlug: config.tracker.projectSlug,
+      assignee: config.tracker.assignee,
+    });
+
+    try {
+      const payload = await client.graphql(
+        `
+query SymphonyLinearConnectionStatus {
+  viewer { id }
+}
+`,
+        {},
+      );
+
+      const viewerId = maybeString(asRecord(asRecord(payload.data).viewer).id);
+
+      logger.info("Linear connection check succeeded", {
+        tracker_kind: "linear",
+        endpoint: config.tracker.endpoint,
+        project_slug: config.tracker.projectSlug,
+        assignee: config.tracker.assignee,
+        viewer_id: viewerId,
+      });
+    } catch (error) {
+      logger.warn("Linear connection check failed", {
+        tracker_kind: "linear",
+        endpoint: config.tracker.endpoint,
+        project_slug: config.tracker.projectSlug,
+        assignee: config.tracker.assignee,
+        has_api_key: Boolean(config.tracker.apiKey),
         reason: String(error),
       });
     }
@@ -981,6 +1048,10 @@ const asRecord = (value: unknown): Record<string, unknown> => {
   }
 
   return {};
+};
+
+const maybeString = (value: unknown): string | null => {
+  return typeof value === "string" && value.length > 0 ? value : null;
 };
 
 export const orchestratorTestUtils = {
