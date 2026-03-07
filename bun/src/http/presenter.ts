@@ -3,11 +3,16 @@ import type { RuntimeSnapshot } from "../types";
 export const statePayload = (snapshot: RuntimeSnapshot): Record<string, unknown> => {
   return {
     generated_at: new Date().toISOString(),
+    workflow: {
+      id: snapshot.workflowId ?? null,
+      path: snapshot.workflowPath ?? null,
+    },
     counts: {
       running: snapshot.running.length,
       retrying: snapshot.retrying.length,
     },
     running: snapshot.running.map((entry) => ({
+      workflow_id: snapshot.workflowId ?? null,
       issue_id: entry.issueId,
       issue_identifier: entry.identifier,
       state: entry.state,
@@ -24,6 +29,7 @@ export const statePayload = (snapshot: RuntimeSnapshot): Record<string, unknown>
       },
     })),
     retrying: snapshot.retrying.map((entry) => ({
+      workflow_id: snapshot.workflowId ?? null,
       issue_id: entry.issueId,
       issue_identifier: entry.identifier,
       attempt: entry.attempt,
@@ -57,6 +63,10 @@ export const issuePayload = (
   return {
     ok: true,
     payload: {
+      workflow: {
+        id: snapshot.workflowId ?? null,
+        path: snapshot.workflowPath ?? null,
+      },
       issue_identifier: issueIdentifier,
       issue_id: running?.issueId ?? retry?.issueId ?? null,
       status: running ? "running" : "retrying",
@@ -113,12 +123,18 @@ export const refreshPayload = (
   queued: true,
   coalesced: boolean,
   requestedAt: Date,
+  workflowId?: string | null,
+  workflowPath?: string | null,
 ): Record<string, unknown> => {
   return {
     queued,
     coalesced,
     requested_at: requestedAt.toISOString(),
     operations: ["poll", "reconcile"],
+    workflow: {
+      id: workflowId ?? null,
+      path: workflowPath ?? null,
+    },
   };
 };
 

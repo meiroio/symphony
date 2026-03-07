@@ -38,10 +38,12 @@ export class SymphonyService {
     });
   }
 
-  async start(): Promise<{ httpPort: number | null }> {
+  async start(): Promise<{ httpPort: number | null; workflowId: string; workflowPath: string }> {
     if (this.started) {
       return {
         httpPort: this.boundHttpPort(),
+        workflowId: this.currentConfig().workflowId ?? "workflow",
+        workflowPath: this.workflowStore.getWorkflowPath(),
       };
     }
 
@@ -66,12 +68,18 @@ export class SymphonyService {
       logger.info("HTTP observability server started", {
         host,
         port: httpPort,
+        workflow_id: config.workflowId ?? "workflow",
+        workflow_path: config.workflowPath ?? this.workflowStore.getWorkflowPath(),
       });
     }
 
     this.started = true;
 
-    return { httpPort };
+    return {
+      httpPort,
+      workflowId: config.workflowId ?? "workflow",
+      workflowPath: config.workflowPath ?? this.workflowStore.getWorkflowPath(),
+    };
   }
 
   async stop(): Promise<void> {
@@ -91,7 +99,7 @@ export class SymphonyService {
 
   private currentConfig() {
     const workflow = this.workflowStore.current();
-    return resolveConfig(workflow, Bun.env, this.serverPortOverride);
+    return resolveConfig(workflow, Bun.env, this.serverPortOverride, this.workflowStore.getWorkflowPath());
   }
 
   private boundHttpPort(): number | null {

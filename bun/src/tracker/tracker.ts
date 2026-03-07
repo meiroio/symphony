@@ -18,6 +18,8 @@ export const createTracker = (
     endpoint: config.tracker.endpoint,
     apiKey: config.tracker.apiKey,
     projectSlug: config.tracker.projectSlug,
+    teamKey: config.tracker.teamKey,
+    teamId: config.tracker.teamId,
     assignee: config.tracker.assignee,
   });
 

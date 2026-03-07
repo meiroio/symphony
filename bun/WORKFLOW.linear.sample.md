@@ -1,4 +1,6 @@
 ---
+workflow:
+  id: "linear-main"
 tracker:
   kind: linear
   project_slug: "<your-linear-project-slug>"

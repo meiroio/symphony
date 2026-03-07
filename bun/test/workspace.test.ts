@@ -12,6 +12,8 @@ const buildConfig = (workspaceRoot: string, hooks: Partial<EffectiveConfig["hook
     endpoint: "https://api.linear.app/graphql",
     apiKey: null,
     projectSlug: null,
+    teamKey: null,
+    teamId: null,
     assignee: null,
     activeStates: ["Todo"],
     terminalStates: ["Done"],

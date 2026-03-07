@@ -181,6 +181,8 @@ export class Orchestrator {
     }));
 
     return {
+      workflowId: this.currentConfig.workflowId ?? this.inferWorkflowId(),
+      workflowPath: this.currentConfig.workflowPath ?? this.workflowStore.getWorkflowPath(),
       running,
       retrying,
       codexTotals: {
@@ -211,7 +213,7 @@ export class Orchestrator {
       try {
         listener();
       } catch (error) {
-        logger.warn("Observer callback failed", { error: String(error) });
+        this.logWarn("Observer callback failed", { error: String(error) });
       }
     }
   }
@@ -249,7 +251,7 @@ export class Orchestrator {
       const validation = validateDispatchConfig(config);
 
       if (!validation.ok) {
-        logger.error("Dispatch validation failed", {
+        this.logError("Dispatch validation failed", {
           code: validation.errorCode,
           reason: validation.message,
         });
@@ -271,7 +273,7 @@ export class Orchestrator {
         }
       }
     } catch (error) {
-      logger.error("Poll cycle failed", { reason: String(error) });
+      this.logError("Poll cycle failed", { reason: String(error) });
     } finally {
       const intervalMs = this.requireConfig().polling.intervalMs;
       this.pollCheckInProgress = false;
@@ -295,7 +297,7 @@ export class Orchestrator {
     try {
       refreshed = await tracker.fetchIssueStatesByIds(issueIds);
     } catch (error) {
-      logger.warn("Running issue state refresh failed; keeping workers running", {
+      this.logWarn("Running issue state refresh failed; keeping workers running", {
         reason: String(error),
       });
       return;
@@ -308,7 +310,7 @@ export class Orchestrator {
       }
 
       if (this.isTerminalState(issue.state)) {
-        logger.info("Issue moved to terminal state; stopping run", {
+        this.logInfo("Issue moved to terminal state; stopping run", {
           issue_id: issue.id,
           issue_identifier: issue.identifier,
           state: issue.state,
@@ -318,7 +320,7 @@ export class Orchestrator {
       }
 
       if (!issue.assignedToWorker) {
-        logger.info("Issue reassigned away; stopping run", {
+        this.logInfo("Issue reassigned away; stopping run", {
           issue_id: issue.id,
           issue_identifier: issue.identifier,
         });
@@ -327,7 +329,7 @@ export class Orchestrator {
       }
 
       if (!this.isActiveState(issue.state)) {
-        logger.info("Issue moved to non-active state; stopping run", {
+        this.logInfo("Issue moved to non-active state; stopping run", {
           issue_id: issue.id,
           issue_identifier: issue.identifier,
           state: issue.state,
@@ -357,7 +359,7 @@ export class Orchestrator {
       const elapsedMs = now.getTime() - activityAt.getTime();
 
       if (elapsedMs > config.codex.stallTimeoutMs) {
-        logger.warn("Issue stalled; restarting with backoff", {
+        this.logWarn("Issue stalled; restarting with backoff", {
           issue_id: issueId,
           issue_identifier: runningEntry.identifier,
           session_id: runningEntry.sessionId,
@@ -438,7 +440,7 @@ export class Orchestrator {
     const currentIssue = refreshed[0] ?? null;
 
     if (!currentIssue) {
-      logger.info("Skipping dispatch; issue is no longer visible", {
+      this.logInfo("Skipping dispatch; issue is no longer visible", {
         issue_id: issue.id,
         issue_identifier: issue.identifier,
       });
@@ -446,7 +448,7 @@ export class Orchestrator {
     }
 
     if (!isCandidateIssue(currentIssue, this.requireConfig())) {
-      logger.info("Skipping dispatch; issue is no longer active", {
+      this.logInfo("Skipping dispatch; issue is no longer active", {
         issue_id: currentIssue.id,
         issue_identifier: currentIssue.identifier,
         state: currentIssue.state,
@@ -455,7 +457,7 @@ export class Orchestrator {
     }
 
     if (isTodoBlockedByNonTerminal(currentIssue, this.requireConfig())) {
-      logger.info("Skipping dispatch; todo issue has non-terminal blockers", {
+      this.logInfo("Skipping dispatch; todo issue has non-terminal blockers", {
         issue_id: currentIssue.id,
         issue_identifier: currentIssue.identifier,
       });
@@ -494,7 +496,7 @@ export class Orchestrator {
       this.retryAttempts.delete(issueId);
     }
 
-    logger.info("Dispatching issue to agent", {
+    this.logInfo("Dispatching issue to agent", {
       issue_id: currentIssue.id,
       issue_identifier: currentIssue.identifier,
       attempt,
@@ -512,7 +514,7 @@ export class Orchestrator {
     attempt: number | null,
     signal: AbortSignal,
   ): Promise<void> {
-    logger.info("Agent task started", {
+    this.logInfo("Agent task started", {
       issue_id: issueId,
       issue_identifier: issue.identifier,
       attempt,
@@ -553,7 +555,7 @@ export class Orchestrator {
         delayType: "continuation",
       });
 
-      logger.info("Agent task completed; scheduling continuation retry", {
+      this.logInfo("Agent task completed; scheduling continuation retry", {
         issue_id: issueId,
         issue_identifier: runningEntry.identifier,
         session_id: runningEntry.sessionId,
@@ -564,7 +566,7 @@ export class Orchestrator {
     }
 
     if (reason === "cancelled") {
-      logger.info("Agent task cancelled", {
+      this.logInfo("Agent task cancelled", {
         issue_id: issueId,
         issue_identifier: runningEntry.identifier,
       });
@@ -579,7 +581,7 @@ export class Orchestrator {
       error: `agent exited: ${reason}`,
     });
 
-    logger.warn("Agent task exited with error; scheduling retry", {
+    this.logWarn("Agent task exited with error; scheduling retry", {
       issue_id: issueId,
       issue_identifier: runningEntry.identifier,
       reason,
@@ -643,7 +645,7 @@ export class Orchestrator {
     }
 
     if (update.event !== "notification") {
-      logger.info("Codex event received", {
+      this.logInfo("Codex event received", {
         issue_id: issueId,
         issue_identifier: runningEntry.identifier,
         event: update.event,
@@ -773,7 +775,7 @@ export class Orchestrator {
         terminalIssues.map((issue) => this.workspaceManager.removeIssueWorkspace(issue.identifier)),
       );
     } catch (error) {
-      logger.warn("Startup terminal workspace cleanup failed", {
+      this.logWarn("Startup terminal workspace cleanup failed", {
         reason: String(error),
       });
     }
@@ -783,7 +785,7 @@ export class Orchestrator {
     const config = this.requireConfig();
 
     if (config.tracker.kind !== "linear") {
-      logger.info("Tracker connection check skipped", {
+      this.logInfo("Tracker connection check skipped", {
         tracker_kind: config.tracker.kind,
       });
       return;
@@ -793,6 +795,8 @@ export class Orchestrator {
       endpoint: config.tracker.endpoint,
       apiKey: config.tracker.apiKey,
       projectSlug: config.tracker.projectSlug,
+      teamKey: config.tracker.teamKey,
+      teamId: config.tracker.teamId,
       assignee: config.tracker.assignee,
     });
 
@@ -808,18 +812,22 @@ query SymphonyLinearConnectionStatus {
 
       const viewerId = maybeString(asRecord(asRecord(payload.data).viewer).id);
 
-      logger.info("Linear connection check succeeded", {
+      this.logInfo("Linear connection check succeeded", {
         tracker_kind: "linear",
         endpoint: config.tracker.endpoint,
         project_slug: config.tracker.projectSlug,
+        team_key: config.tracker.teamKey,
+        team_id: config.tracker.teamId,
         assignee: config.tracker.assignee,
         viewer_id: viewerId,
       });
     } catch (error) {
-      logger.warn("Linear connection check failed", {
+      this.logWarn("Linear connection check failed", {
         tracker_kind: "linear",
         endpoint: config.tracker.endpoint,
         project_slug: config.tracker.projectSlug,
+        team_key: config.tracker.teamKey,
+        team_id: config.tracker.teamId,
         assignee: config.tracker.assignee,
         has_api_key: Boolean(config.tracker.apiKey),
         reason: String(error),
@@ -837,7 +845,12 @@ query SymphonyLinearConnectionStatus {
 
   private resolveCurrentConfig(): EffectiveConfig {
     const workflow = this.workflowStore.current();
-    return resolveConfig(workflow, Bun.env, this.serverPortOverride);
+    return resolveConfig(
+      workflow,
+      Bun.env,
+      this.serverPortOverride,
+      this.workflowStore.getWorkflowPath(),
+    );
   }
 
   private requireConfig(): EffectiveConfig {
@@ -864,6 +877,38 @@ query SymphonyLinearConnectionStatus {
 
   private recordSessionCompletionTotals(runningEntry: RunningEntry): void {
     this.codexTotals.secondsRunning += runningSeconds(runningEntry.startedAt, new Date());
+  }
+
+  private workflowLogContext(context: Record<string, unknown> = {}): Record<string, unknown> {
+    const config = this.currentConfig;
+    return {
+      workflow_id: config?.workflowId ?? this.inferWorkflowId(),
+      workflow_path: config?.workflowPath ?? this.workflowStore.getWorkflowPath(),
+      ...context,
+    };
+  }
+
+  private inferWorkflowId(): string {
+    const path = this.workflowStore.getWorkflowPath();
+    const fileName = path.split(/[\\/]/).pop() ?? "workflow";
+    const withoutExt = fileName.replace(/\.[^.]+$/, "").trim();
+    return withoutExt.length > 0 ? withoutExt : "workflow";
+  }
+
+  private logInfo(message: string, context: Record<string, unknown> = {}): void {
+    logger.info(message, this.workflowLogContext(context));
+  }
+
+  private logWarn(message: string, context: Record<string, unknown> = {}): void {
+    logger.warn(message, this.workflowLogContext(context));
+  }
+
+  private logError(message: string, context: Record<string, unknown> = {}): void {
+    logger.error(message, this.workflowLogContext(context));
+  }
+
+  private logDebug(message: string, context: Record<string, unknown> = {}): void {
+    logger.debug(message, this.workflowLogContext(context));
   }
 }
 

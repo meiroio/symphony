@@ -4,9 +4,79 @@ import { SymphonyError } from "../utils/errors";
 const ISSUE_PAGE_SIZE = 50;
 const NETWORK_TIMEOUT_MS = 30_000;
 
-const CANDIDATE_QUERY = `
-query SymphonyLinearPoll($projectSlug: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $after: String) {
+const CANDIDATE_BY_PROJECT_QUERY = `
+query SymphonyLinearPollByProject($projectSlug: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $after: String) {
   issues(filter: {project: {slugId: {eq: $projectSlug}}, state: {name: {in: $stateNames}}}, first: $first, after: $after) {
+    nodes {
+      id
+      identifier
+      title
+      description
+      priority
+      state { name }
+      branchName
+      url
+      assignee { id }
+      labels { nodes { name } }
+      inverseRelations(first: $relationFirst) {
+        nodes {
+          type
+          issue {
+            id
+            identifier
+            state { name }
+          }
+        }
+      }
+      createdAt
+      updatedAt
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+`;
+
+const CANDIDATE_BY_TEAM_KEY_QUERY = `
+query SymphonyLinearPollByTeamKey($teamKey: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $after: String) {
+  issues(filter: {team: {key: {eq: $teamKey}}, state: {name: {in: $stateNames}}}, first: $first, after: $after) {
+    nodes {
+      id
+      identifier
+      title
+      description
+      priority
+      state { name }
+      branchName
+      url
+      assignee { id }
+      labels { nodes { name } }
+      inverseRelations(first: $relationFirst) {
+        nodes {
+          type
+          issue {
+            id
+            identifier
+            state { name }
+          }
+        }
+      }
+      createdAt
+      updatedAt
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+`;
+
+const CANDIDATE_BY_TEAM_ID_QUERY = `
+query SymphonyLinearPollByTeamId($teamId: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $after: String) {
+  issues(filter: {team: {id: {eq: $teamId}}, state: {name: {in: $stateNames}}}, first: $first, after: $after) {
     nodes {
       id
       identifier
@@ -80,6 +150,8 @@ export interface LinearClientOptions {
   endpoint: string;
   apiKey: string | null;
   projectSlug: string | null;
+  teamKey: string | null;
+  teamId: string | null;
   assignee: string | null;
 }
 
@@ -91,12 +163,16 @@ export class LinearClient {
   private readonly endpoint: string;
   private readonly apiKey: string | null;
   private readonly projectSlug: string | null;
+  private readonly teamKey: string | null;
+  private readonly teamId: string | null;
   private readonly assignee: string | null;
 
   constructor(options: LinearClientOptions) {
     this.endpoint = options.endpoint;
     this.apiKey = options.apiKey;
     this.projectSlug = options.projectSlug;
+    this.teamKey = options.teamKey;
+    this.teamId = options.teamId;
     this.assignee = options.assignee;
   }
 
@@ -105,12 +181,10 @@ export class LinearClient {
       throw new SymphonyError("missing_linear_api_token", "Linear API token is missing");
     }
 
-    if (!this.projectSlug) {
-      throw new SymphonyError("missing_linear_project_slug", "Linear project slug is missing");
-    }
+    const scope = this.resolveScopeOrThrow();
 
     const assigneeFilter = await this.routingAssigneeFilter();
-    return this.fetchByStates(this.projectSlug, activeStates, assigneeFilter);
+    return this.fetchByStates(scope, activeStates, assigneeFilter);
   }
 
   async fetchIssuesByStates(stateNames: string[]): Promise<Issue[]> {
@@ -122,11 +196,9 @@ export class LinearClient {
       throw new SymphonyError("missing_linear_api_token", "Linear API token is missing");
     }
 
-    if (!this.projectSlug) {
-      throw new SymphonyError("missing_linear_project_slug", "Linear project slug is missing");
-    }
+    const scope = this.resolveScopeOrThrow();
 
-    return this.fetchByStates(this.projectSlug, stateNames, null);
+    return this.fetchByStates(scope, stateNames, null);
   }
 
   async fetchIssueStatesByIds(issueIds: string[]): Promise<Issue[]> {
@@ -214,7 +286,7 @@ export class LinearClient {
   }
 
   private async fetchByStates(
-    projectSlug: string,
+    scope: LinearScope,
     stateNames: string[],
     assigneeFilter: AssigneeFilter | null,
   ): Promise<Issue[]> {
@@ -222,8 +294,10 @@ export class LinearClient {
     const allIssues: Issue[] = [];
 
     while (true) {
-      const body = await this.graphql(CANDIDATE_QUERY, {
-        projectSlug,
+      const scopedQuery = this.scopeQuery(scope);
+
+      const body = await this.graphql(scopedQuery.query, {
+        ...scopedQuery.variables,
         stateNames,
         first: ISSUE_PAGE_SIZE,
         relationFirst: ISSUE_PAGE_SIZE,
@@ -265,6 +339,52 @@ export class LinearClient {
     }
 
     return allIssues;
+  }
+
+  private resolveScopeOrThrow(): LinearScope {
+    if (this.projectSlug) {
+      return { type: "projectSlug", value: this.projectSlug };
+    }
+
+    if (this.teamKey) {
+      return { type: "teamKey", value: this.teamKey };
+    }
+
+    if (this.teamId) {
+      return { type: "teamId", value: this.teamId };
+    }
+
+    throw new SymphonyError(
+      "missing_linear_scope",
+      "Linear scope is missing (set project_slug or team_key or team_id)",
+    );
+  }
+
+  private scopeQuery(scope: LinearScope): { query: string; variables: Record<string, unknown> } {
+    if (scope.type === "projectSlug") {
+      return {
+        query: CANDIDATE_BY_PROJECT_QUERY,
+        variables: {
+          projectSlug: scope.value,
+        },
+      };
+    }
+
+    if (scope.type === "teamKey") {
+      return {
+        query: CANDIDATE_BY_TEAM_KEY_QUERY,
+        variables: {
+          teamKey: scope.value,
+        },
+      };
+    }
+
+    return {
+      query: CANDIDATE_BY_TEAM_ID_QUERY,
+      variables: {
+        teamId: scope.value,
+      },
+    };
   }
 
   private normalizeIssue(raw: unknown, assigneeFilter: AssigneeFilter | null): Issue | null {
@@ -373,6 +493,11 @@ export class LinearClient {
     return assigneeFilter.matchValues.has(assigneeId);
   }
 }
+
+type LinearScope =
+  | { type: "projectSlug"; value: string }
+  | { type: "teamKey"; value: string }
+  | { type: "teamId"; value: string };
 
 const asRecord = (value: unknown): Record<string, unknown> => {
   if (value && typeof value === "object" && !Array.isArray(value)) {

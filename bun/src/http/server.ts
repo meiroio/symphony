@@ -80,8 +80,15 @@ const buildApp = (
 
   app.post("/api/v1/refresh", ({ set }) => {
     const payload = orchestrator.requestRefresh();
+    const config = configProvider();
     set.status = 202;
-    return refreshPayload(true, payload.coalesced, payload.requestedAt);
+    return refreshPayload(
+      true,
+      payload.coalesced,
+      payload.requestedAt,
+      config.workflowId ?? null,
+      config.workflowPath ?? null,
+    );
   });
 
   app.get("/api/v1/:issue_identifier", ({ params, set }) => {

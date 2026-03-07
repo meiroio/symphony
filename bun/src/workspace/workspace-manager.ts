@@ -80,7 +80,7 @@ export class WorkspaceManager {
         });
       }
 
-      logger.info("Repository cloned for workspace", {
+      this.logInfo("Repository cloned for workspace", {
         issue_id: issue.issueId,
         issue_identifier: issue.issueIdentifier,
         repository_id: repository.id,
@@ -99,7 +99,7 @@ export class WorkspaceManager {
   ): Promise<void> {
     const statusResult = await this.runCommand(["git", "status", "--porcelain"], targetPath, GIT_SYNC_TIMEOUT_MS);
     if (statusResult.exitCode !== 0) {
-      logger.warn("Repository sync skipped; unable to read git status", {
+      this.logWarn("Repository sync skipped; unable to read git status", {
         issue_id: issue.issueId,
         issue_identifier: issue.issueIdentifier,
         repository_id: repository.id,
@@ -111,7 +111,7 @@ export class WorkspaceManager {
     }
 
     if (statusResult.stdout.trim().length > 0) {
-      logger.info("Repository has local changes; skipping git pull", {
+      this.logInfo("Repository has local changes; skipping git pull", {
         issue_id: issue.issueId,
         issue_identifier: issue.issueIdentifier,
         repository_id: repository.id,
@@ -127,7 +127,7 @@ export class WorkspaceManager {
       GIT_SYNC_TIMEOUT_MS,
     );
     if (fetchResult.exitCode !== 0) {
-      logger.warn("Repository sync failed during fetch", {
+      this.logWarn("Repository sync failed during fetch", {
         issue_id: issue.issueId,
         issue_identifier: issue.issueIdentifier,
         repository_id: repository.id,
@@ -144,7 +144,7 @@ export class WorkspaceManager {
       GIT_SYNC_TIMEOUT_MS,
     );
     if (branchResult.exitCode !== 0) {
-      logger.warn("Repository sync failed; unable to determine current branch", {
+      this.logWarn("Repository sync failed; unable to determine current branch", {
         issue_id: issue.issueId,
         issue_identifier: issue.issueIdentifier,
         repository_id: repository.id,
@@ -167,7 +167,7 @@ export class WorkspaceManager {
         GIT_SYNC_TIMEOUT_MS,
       );
       if (checkoutResult.exitCode !== 0) {
-        logger.warn("Repository sync failed during detached HEAD checkout", {
+        this.logWarn("Repository sync failed during detached HEAD checkout", {
           issue_id: issue.issueId,
           issue_identifier: issue.issueIdentifier,
           repository_id: repository.id,
@@ -186,7 +186,7 @@ export class WorkspaceManager {
       GIT_SYNC_TIMEOUT_MS,
     );
     if (pullResult.exitCode !== 0) {
-      logger.warn("Repository sync failed during pull", {
+      this.logWarn("Repository sync failed during pull", {
         issue_id: issue.issueId,
         issue_identifier: issue.issueIdentifier,
         repository_id: repository.id,
@@ -198,7 +198,7 @@ export class WorkspaceManager {
       return;
     }
 
-    logger.info("Repository synced with remote via git pull", {
+    this.logInfo("Repository synced with remote via git pull", {
       issue_id: issue.issueId,
       issue_identifier: issue.issueIdentifier,
       repository_id: repository.id,
@@ -245,7 +245,7 @@ export class WorkspaceManager {
     try {
       await this.remove(workspace);
     } catch (error) {
-      logger.warn("Workspace cleanup failed", {
+      this.logWarn("Workspace cleanup failed", {
         issue_identifier: identifier,
         error: asErrorMessage(error),
       });
@@ -270,7 +270,7 @@ export class WorkspaceManager {
     try {
       await this.runHook(script, workspace, this.issueContext(issueOrIdentifier), "after_run", false);
     } catch (error) {
-      logger.warn("after_run hook failed and was ignored", {
+      this.logWarn("after_run hook failed and was ignored", {
         issue_identifier: this.issueContext(issueOrIdentifier).issueIdentifier,
         error: asErrorMessage(error),
       });
@@ -361,7 +361,7 @@ export class WorkspaceManager {
   ): Promise<void> {
     const timeoutMs = this.configProvider().hooks.timeoutMs;
 
-    logger.info("Running workspace hook", {
+    this.logInfo("Running workspace hook", {
       hook: hookName,
       issue_id: issue.issueId,
       issue_identifier: issue.issueIdentifier,
@@ -409,7 +409,7 @@ export class WorkspaceManager {
         });
       }
 
-      logger.warn("Workspace hook failed and was ignored", {
+      this.logWarn("Workspace hook failed and was ignored", {
         hook: hookName,
         issue_id: issue.issueId,
         issue_identifier: issue.issueIdentifier,
@@ -419,7 +419,7 @@ export class WorkspaceManager {
       });
     }
 
-    logger.info("Workspace hook finished", {
+    this.logInfo("Workspace hook finished", {
       hook: hookName,
       issue_id: issue.issueId,
       issue_identifier: issue.issueIdentifier,
@@ -510,6 +510,23 @@ export class WorkspaceManager {
       stdout,
       stderr,
     };
+  }
+
+  private workflowLogContext(context: Record<string, unknown> = {}): Record<string, unknown> {
+    const config = this.configProvider();
+    return {
+      workflow_id: config.workflowId ?? "workflow",
+      workflow_path: config.workflowPath ?? null,
+      ...context,
+    };
+  }
+
+  private logInfo(message: string, context: Record<string, unknown> = {}): void {
+    logger.info(message, this.workflowLogContext(context));
+  }
+
+  private logWarn(message: string, context: Record<string, unknown> = {}): void {
+    logger.warn(message, this.workflowLogContext(context));
   }
 
   private async pathExists(path: string): Promise<boolean> {

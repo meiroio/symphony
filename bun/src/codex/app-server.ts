@@ -40,7 +40,7 @@ export class AppServerClient {
     });
 
     const stdoutBus = new JsonLineBus(process.stdout, (line) => {
-      logStreamLine("response stream", line);
+      this.logStreamLine("response stream", line);
     });
 
     stdoutBus.start();
@@ -433,7 +433,7 @@ export class AppServerClient {
         const { value, done } = await reader.read();
         if (done) {
           if (pending.trim()) {
-            logStreamLine("stderr", pending);
+            this.logStreamLine("stderr", pending);
           }
           break;
         }
@@ -444,10 +444,30 @@ export class AppServerClient {
         pending = lines.pop() ?? "";
 
         for (const line of lines) {
-          logStreamLine("stderr", line);
+          this.logStreamLine("stderr", line);
         }
       }
     })();
+  }
+
+  private logStreamLine(streamLabel: string, line: string): void {
+    const text = line.trim().slice(0, 1_000);
+    if (!text) {
+      return;
+    }
+
+    const config = this.configProvider();
+    const context = {
+      workflow_id: config.workflowId ?? "workflow",
+      workflow_path: config.workflowPath ?? null,
+      line: text,
+    };
+
+    if (/\b(error|warn|warning|failed|fatal|panic|exception)\b/i.test(text)) {
+      logger.warn(`Codex ${streamLabel} output`, context);
+    } else {
+      logger.debug(`Codex ${streamLabel} output`, context);
+    }
   }
 }
 
@@ -656,17 +676,4 @@ const buildUnavailableAnswers = (
   }
 
   return answers;
-};
-
-const logStreamLine = (streamLabel: string, line: string): void => {
-  const text = line.trim().slice(0, 1_000);
-  if (!text) {
-    return;
-  }
-
-  if (/\b(error|warn|warning|failed|fatal|panic|exception)\b/i.test(text)) {
-    logger.warn(`Codex ${streamLabel} output`, { line: text });
-  } else {
-    logger.debug(`Codex ${streamLabel} output`, { line: text });
-  }
 };

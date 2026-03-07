@@ -8,22 +8,29 @@ import { defaultWorkflowPath } from "./config/workflow";
 import { logger } from "./utils/logger";
 
 interface CliOptions {
-  workflowPath: string;
+  workflowPaths: string[];
   portOverride: number | null;
 }
 
-const main = async (): Promise<void> => {
-  const options = parseArgs(Bun.argv.slice(2));
-  await assertWorkflowExists(options.workflowPath);
+export const main = async (rawArgs: string[] = Bun.argv.slice(2)): Promise<void> => {
+  const options = parseArgs(rawArgs);
+  await Promise.all(options.workflowPaths.map((workflowPath) => assertWorkflowExists(workflowPath)));
 
-  const service = new SymphonyService({
-    workflowPath: options.workflowPath,
-    serverPortOverride: options.portOverride,
-  });
+  const serviceSpecs = options.workflowPaths.map((workflowPath, index) => ({
+    workflowPath,
+    service: new SymphonyService({
+      workflowPath,
+      serverPortOverride: options.workflowPaths.length === 1 ? options.portOverride : null,
+    }),
+    index,
+  }));
 
   const shutdown = async (signal: string) => {
-    logger.info("Shutting down Symphony service", { signal });
-    await service.stop();
+    logger.info("Shutting down Symphony service", {
+      signal,
+      workflows: options.workflowPaths,
+    });
+    await Promise.all(serviceSpecs.map(({ service }) => service.stop()));
     process.exit(0);
   };
 
@@ -35,16 +42,21 @@ const main = async (): Promise<void> => {
     void shutdown("SIGTERM");
   });
 
-  const { httpPort } = await service.start();
+  for (const { workflowPath, service, index } of serviceSpecs) {
+    const { httpPort, workflowId, workflowPath } = await service.start();
 
-  logger.info("Symphony Bun service started", {
-    workflow_path: options.workflowPath,
-    http_port: httpPort,
-  });
+    logger.info("Symphony Bun service started", {
+      workflow_path: workflowPath,
+      workflow_id: workflowId,
+      http_port: httpPort,
+      service_index: index,
+      total_services: serviceSpecs.length,
+    });
+  }
 };
 
-const parseArgs = (args: string[]): CliOptions => {
-  let workflowPath: string | null = null;
+export const parseArgs = (args: string[]): CliOptions => {
+  const workflowPaths: string[] = [];
   let portOverride: number | null = null;
 
   for (let index = 0; index < args.length; index += 1) {
@@ -73,15 +85,17 @@ const parseArgs = (args: string[]): CliOptions => {
       throw new Error(`Unknown option: ${arg}`);
     }
 
-    if (workflowPath) {
-      throw new Error("Only one workflow path may be provided");
-    }
+    workflowPaths.push(resolve(arg));
+  }
 
-    workflowPath = resolve(arg);
+  const resolvedWorkflowPaths = workflowPaths.length > 0 ? workflowPaths : [defaultWorkflowPath()];
+
+  if (portOverride !== null && resolvedWorkflowPaths.length > 1) {
+    throw new Error("--port can only be used with a single workflow path");
   }
 
   return {
-    workflowPath: workflowPath ?? defaultWorkflowPath(),
+    workflowPaths: resolvedWorkflowPaths,
     portOverride,
   };
 };
@@ -94,11 +108,18 @@ const assertWorkflowExists = async (workflowPath: string): Promise<void> => {
   }
 };
 
-main().catch((error) => {
-  logger.error("Symphony Bun startup failed", {
-    reason: error instanceof Error ? error.message : String(error),
-  });
+if (import.meta.main) {
+  main().catch((error) => {
+    logger.error("Symphony Bun startup failed", {
+      reason: error instanceof Error ? error.message : String(error),
+    });
 
-  console.error(`\nUsage: bun run src/cli.ts [--port <port>] [path-to-WORKFLOW.md]\n`);
-  process.exit(1);
-});
+    console.error(
+      "\nUsage: bun run src/cli.ts [--port <port>] [path-to-WORKFLOW.md ...]\n" +
+        "Examples:\n" +
+        "  bun run src/cli.ts ./workflows/WORKFLOW.linear.local.md\n" +
+        "  bun run src/cli.ts ./workflows/WORKFLOW.linear.local.md ./workflows/WORKFLOW.linear.team-review.local.md\n",
+    );
+    process.exit(1);
+  });
+}

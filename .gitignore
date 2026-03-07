@@ -1,6 +1,6 @@
 # Bun dependencies
 bun/node_modules/
-bun/WORKFLOW.linear.local.md
+bun/workflows/*.local.md
 
 # Common local artifacts
 .DS_Store

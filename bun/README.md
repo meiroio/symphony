@@ -29,6 +29,27 @@ bun run src/cli.ts /absolute/path/to/WORKFLOW.md --port 8787
 
 If no workflow path is passed, the CLI uses `./WORKFLOW.md` from the current working directory.
 
+Run multiple workflows in one process:
+
+```bash
+cd bun
+bun run src/cli.ts ./workflows/WORKFLOW.linear.local.md ./workflows/WORKFLOW.linear.team-review.local.md
+```
+
+Notes:
+
+- One Symphony service is started per workflow file.
+- Each workflow should use a distinct `server.port` to avoid HTTP port conflicts.
+- `--port` override is only valid when running a single workflow.
+- Optional: set `workflow.id` in workflow front matter for a stable identity in logs and API payloads.
+
+Run all workflows from the `workflows/` directory:
+
+```bash
+cd bun
+bun run workflows
+```
+
 ## Testing
 
 ```bash
@@ -73,27 +94,29 @@ Project:
 Workflow file:
 
 - Start from `./WORKFLOW.linear.sample.md`.
-- Copy it to `./WORKFLOW.linear.local.md` and fill in your project slug/token setup.
-- Use `./WORKFLOW.linear.local.md` (git-ignored).
+- Copy it to `./workflows/WORKFLOW.linear.local.md` and fill in your project slug/token setup.
+- Use `./workflows/WORKFLOW.linear.local.md` (git-ignored).
 - Do not commit tokens; keep secrets local.
 - Configure `repositories` so each issue workspace clones the correct repo(s) automatically.
+- For team-wide review automation, start from `./WORKFLOW.linear.team-review.sample.md` and use `tracker.team_key` (for example `PIP`) instead of `project_slug`.
 
 ```bash
 cd /Users/vorcigernix/Dev/symphony/bun
-bun run src/cli.ts ./WORKFLOW.linear.local.md --port 8790
+bun run src/cli.ts ./workflows/WORKFLOW.linear.local.md --port 8790
 ```
 
 Notes:
 
 - `WORKFLOW.test.md` uses dummy Linear credentials, so tracker calls can fail with
   warnings during smoke; this is expected.
-- If `WORKFLOW.linear.local.md` uses `api_key: "$LINEAR_API_KEY"`, export your
+- If `workflows/WORKFLOW.linear.local.md` uses `api_key: "$LINEAR_API_KEY"`, export your
   token in the same shell before starting the service.
 - For full MVP verification details, use
   [`docs/mvp-manual-test.md`](./docs/mvp-manual-test.md).
 - `repositories` entries are cloned on workspace creation, so the agent works in a deterministic repo layout.
 - On subsequent runs for the same workspace, Symphony attempts `git fetch` + `git pull --ff-only` for configured repositories when the working tree is clean.
 - If a repository has local changes, pull is skipped for safety and work continues with current workspace state.
+- Team scope is supported directly in polling (`tracker.team_key` / `tracker.team_id`); a separate webhook is not required for team visibility.
 
 ## Manual MVP Validation
 

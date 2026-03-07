@@ -24,28 +24,28 @@ export class AgentRunner {
   async run(issue: Issue, tracker: TrackerAdapter, options: WorkerRunOptions): Promise<void> {
     this.throwIfAborted(options.signal);
 
-    logger.info("Agent runner started", {
+    this.logInfo("Agent runner started", {
       issue_id: issue.id,
       issue_identifier: issue.identifier,
       attempt: options.attempt,
     });
 
     const workspace = await this.workspaceManager.createForIssue(issue);
-    logger.info("Workspace prepared for issue", {
+    this.logInfo("Workspace prepared for issue", {
       issue_id: issue.id,
       issue_identifier: issue.identifier,
       workspace,
     });
 
     await this.workspaceManager.runBeforeRunHook(workspace, issue);
-    logger.info("before_run hook completed", {
+    this.logInfo("before_run hook completed", {
       issue_id: issue.id,
       issue_identifier: issue.identifier,
       workspace,
     });
 
     const session = await this.appServerClient.startSession(workspace);
-    logger.info("Codex app-server session started", {
+    this.logInfo("Codex app-server session started", {
       issue_id: issue.id,
       issue_identifier: issue.identifier,
       workspace,
@@ -60,7 +60,7 @@ export class AgentRunner {
 
       while (turnNumber <= maxTurns) {
         this.throwIfAborted(options.signal);
-        logger.info("Starting codex turn", {
+        this.logInfo("Starting codex turn", {
           issue_id: currentIssue.id,
           issue_identifier: currentIssue.identifier,
           turn_number: turnNumber,
@@ -92,7 +92,7 @@ export class AgentRunner {
             : {};
 
         const turnResult = await this.appServerClient.runTurn(session, prompt, currentIssue, runTurnOptions);
-        logger.info("Codex turn finished", {
+        this.logInfo("Codex turn finished", {
           issue_id: currentIssue.id,
           issue_identifier: currentIssue.identifier,
           turn_number: turnNumber,
@@ -103,7 +103,7 @@ export class AgentRunner {
 
         const issueId = currentIssue.id;
         if (!issueId) {
-          logger.warn("Stopping run because issue id is missing after turn", {
+          this.logWarn("Stopping run because issue id is missing after turn", {
             issue_identifier: currentIssue.identifier,
             turn_number: turnNumber,
           });
@@ -114,7 +114,7 @@ export class AgentRunner {
         currentIssue = refreshed[0] ?? currentIssue;
 
         if (!this.isActiveState(currentIssue.state)) {
-          logger.info("Stopping run because issue is no longer active", {
+          this.logInfo("Stopping run because issue is no longer active", {
             issue_id: currentIssue.id,
             issue_identifier: currentIssue.identifier,
             state: currentIssue.state,
@@ -124,7 +124,7 @@ export class AgentRunner {
         }
 
         if (turnNumber >= maxTurns) {
-          logger.info("Stopping run because max turns reached", {
+          this.logInfo("Stopping run because max turns reached", {
             issue_id: currentIssue.id,
             issue_identifier: currentIssue.identifier,
             max_turns: maxTurns,
@@ -135,14 +135,14 @@ export class AgentRunner {
         turnNumber += 1;
       }
     } finally {
-      logger.info("Stopping codex app-server session", {
+      this.logInfo("Stopping codex app-server session", {
         issue_id: issue.id,
         issue_identifier: issue.identifier,
         thread_id: session.threadId,
       });
       this.appServerClient.stopSession(session);
       await this.workspaceManager.runAfterRunHook(workspace, issue);
-      logger.info("after_run hook completed", {
+      this.logInfo("after_run hook completed", {
         issue_id: issue.id,
         issue_identifier: issue.identifier,
         workspace,
@@ -167,6 +167,23 @@ export class AgentRunner {
     if (signal.aborted) {
       throw new Error("run_aborted");
     }
+  }
+
+  private workflowLogContext(context: Record<string, unknown> = {}): Record<string, unknown> {
+    const config = this.configProvider();
+    return {
+      workflow_id: config.workflowId ?? "workflow",
+      workflow_path: config.workflowPath ?? null,
+      ...context,
+    };
+  }
+
+  private logInfo(message: string, context: Record<string, unknown> = {}): void {
+    logger.info(message, this.workflowLogContext(context));
+  }
+
+  private logWarn(message: string, context: Record<string, unknown> = {}): void {
+    logger.warn(message, this.workflowLogContext(context));
   }
 }
 

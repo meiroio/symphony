@@ -48,6 +48,8 @@ export interface TrackerConfig {
   endpoint: string;
   apiKey: string | null;
   projectSlug: string | null;
+  teamKey: string | null;
+  teamId: string | null;
   assignee: string | null;
   activeStates: string[];
   terminalStates: string[];
@@ -88,6 +90,8 @@ export interface EffectiveConfig {
   polling: PollingConfig;
   workspace: WorkspaceConfig;
   repositories?: RepositoryConfig[];
+  workflowId?: string;
+  workflowPath?: string | null;
   hooks: HookConfig;
   agent: AgentConfig;
   codex: CodexConfig;
@@ -133,6 +137,8 @@ export interface CodexTotals {
 }
 
 export interface RuntimeSnapshot {
+  workflowId?: string;
+  workflowPath?: string | null;
   running: Array<{
     issueId: string;
     identifier: string;

@@ -1,5 +1,5 @@
 import { tmpdir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 
 import type { EffectiveConfig, RepositoryConfig, WorkflowDefinition } from "../types";
 import {
@@ -55,6 +55,7 @@ export const resolveConfig = (
   workflow: WorkflowDefinition,
   env: NodeJS.ProcessEnv = Bun.env,
   serverPortOverride: number | null = null,
+  workflowPath: string | null = null,
 ): EffectiveConfig => {
   const config = asRecord(workflow.config);
 
@@ -65,6 +66,7 @@ export const resolveConfig = (
   const agent = asRecord(config.agent);
   const codex = asRecord(config.codex);
   const server = asRecord(config.server);
+  const workflowMeta = asRecord(config.workflow);
   const repositories = normalizeRepositories(config.repositories, env);
 
   const activeStates = parseCsvStringOrArray(tracker.active_states) ?? DEFAULT_ACTIVE_STATES;
@@ -99,6 +101,10 @@ export const resolveConfig = (
       : DEFAULT_PROMPT_TEMPLATE;
 
   const fallbackApiKey = normalizeSecret(env.LINEAR_API_KEY ?? null);
+  const resolvedWorkflowPath = workflowPath ? resolve(workflowPath) : null;
+  const configuredWorkflowId = normalizeNonEmptyString(workflowMeta.id);
+  const inferredWorkflowId = inferWorkflowIdFromPath(resolvedWorkflowPath);
+  const workflowId = configuredWorkflowId ?? inferredWorkflowId ?? "workflow";
 
   return {
     tracker: {
@@ -108,6 +114,8 @@ export const resolveConfig = (
         (normalizeTrackerKind(tracker.kind) === "linear" ? DEFAULT_LINEAR_ENDPOINT : DEFAULT_LINEAR_ENDPOINT),
       apiKey: normalizeSecret(resolveEnvBackedSecret(tracker.api_key, env, fallbackApiKey)),
       projectSlug: normalizeSecret(normalizeValueToString(tracker.project_slug)),
+      teamKey: normalizeSecret(resolveEnvBackedSecret(tracker.team_key, env, null)),
+      teamId: normalizeSecret(resolveEnvBackedSecret(tracker.team_id, env, null)),
       assignee: normalizeSecret(resolveEnvBackedSecret(tracker.assignee, env, env.LINEAR_ASSIGNEE ?? null)),
       activeStates,
       terminalStates,
@@ -119,6 +127,8 @@ export const resolveConfig = (
       root: resolvedWorkspaceRoot,
     },
     repositories,
+    workflowId,
+    workflowPath: resolvedWorkflowPath,
     hooks: {
       afterCreate: normalizeHookScript(hooks.after_create),
       beforeRun: normalizeHookScript(hooks.before_run),
@@ -180,11 +190,11 @@ export const validateDispatchConfig = (config: EffectiveConfig): DispatchValidat
       };
     }
 
-    if (!config.tracker.projectSlug) {
+    if (!config.tracker.projectSlug && !config.tracker.teamKey && !config.tracker.teamId) {
       return {
         ok: false,
-        errorCode: "missing_linear_project_slug",
-        message: "Linear project slug is missing",
+        errorCode: "missing_linear_scope",
+        message: "Linear scope is missing (set tracker.project_slug or tracker.team_key or tracker.team_id)",
       };
     }
   }
@@ -222,6 +232,20 @@ const normalizeValueToString = (value: unknown): string | null => {
   }
 
   return null;
+};
+
+const inferWorkflowIdFromPath = (workflowPath: string | null): string | null => {
+  if (!workflowPath) {
+    return null;
+  }
+
+  const name = basename(workflowPath).trim();
+  if (!name) {
+    return null;
+  }
+
+  const withoutExt = name.replace(/\.[^.]+$/, "").trim();
+  return withoutExt.length > 0 ? withoutExt : null;
 };
 
 const normalizeNonEmptyString = (value: unknown): string | null => {

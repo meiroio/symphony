@@ -9,6 +9,8 @@ const baseConfig = (): EffectiveConfig => ({
     endpoint: "https://api.linear.app/graphql",
     apiKey: null,
     projectSlug: null,
+    teamKey: null,
+    teamId: null,
     assignee: null,
     activeStates: ["Todo", "In Progress"],
     terminalStates: ["Done", "Closed", "Cancelled", "Canceled", "Duplicate"],

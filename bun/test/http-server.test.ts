@@ -33,12 +33,17 @@ describe("http server", () => {
     const payload = (await response.json()) as Record<string, unknown>;
 
     expect(payload.generated_at).toBeString();
+    expect(payload.workflow).toEqual({
+      id: "workflow-http",
+      path: "/tmp/workflows/workflow-http.md",
+    });
     expect(payload.counts).toEqual({ running: 1, retrying: 1 });
 
     const runningList = payload.running as Array<Record<string, unknown>>;
     expect(runningList.length).toBe(1);
     const running = runningList[0]!;
     expect(running.issue_id).toBe("issue-http");
+    expect(running.workflow_id).toBe("workflow-http");
     expect(running.issue_identifier).toBe("MT-HTTP");
     expect(running.state).toBe("In Progress");
     expect(running.session_id).toBe("thread-http");
@@ -49,6 +54,7 @@ describe("http server", () => {
     expect(retryingList.length).toBe(1);
     const retrying = retryingList[0]!;
     expect(retrying.issue_id).toBe("issue-retry");
+    expect(retrying.workflow_id).toBe("workflow-http");
     expect(retrying.issue_identifier).toBe("MT-RETRY");
     expect(retrying.attempt).toBe(2);
     expect(retrying.error).toBe("boom");
@@ -74,6 +80,10 @@ describe("http server", () => {
     const runningPayload = (await runningResponse.json()) as Record<string, unknown>;
 
     expect(runningPayload.issue_identifier).toBe("MT-HTTP");
+    expect(runningPayload.workflow).toEqual({
+      id: "workflow-http",
+      path: "/tmp/workflows/workflow-http.md",
+    });
     expect(runningPayload.issue_id).toBe("issue-http");
     expect(runningPayload.status).toBe("running");
     expect(runningPayload.workspace).toEqual({ path: "/tmp/symphony-http/MT-HTTP" });
@@ -127,6 +137,10 @@ describe("http server", () => {
     expect(refreshPayload.coalesced).toBeFalse();
     expect(refreshPayload.operations).toEqual(["poll", "reconcile"]);
     expect(typeof refreshPayload.requested_at).toBe("string");
+    expect(refreshPayload.workflow).toEqual({
+      id: null,
+      path: null,
+    });
 
     const methodCases: Array<{ method: string; path: string }> = [
       { method: "POST", path: "/api/v1/state" },
@@ -192,6 +206,8 @@ const startServer = (snapshot: RuntimeSnapshot): { baseUrl: string } => {
       endpoint: "https://api.linear.app/graphql",
       apiKey: null,
       projectSlug: null,
+      teamKey: null,
+      teamId: null,
       assignee: null,
       activeStates: ["Todo"],
       terminalStates: ["Done"],
@@ -242,6 +258,8 @@ const startServer = (snapshot: RuntimeSnapshot): { baseUrl: string } => {
 
 const staticSnapshot = (): RuntimeSnapshot => {
   return {
+    workflowId: "workflow-http",
+    workflowPath: "/tmp/workflows/workflow-http.md",
     running: [
       {
         issueId: "issue-http",

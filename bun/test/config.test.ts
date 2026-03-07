@@ -91,6 +91,35 @@ describe("config", () => {
     expect(validateDispatchConfig(valid)).toEqual({ ok: true });
   });
 
+  test("dispatch validation accepts team scope and rejects missing linear scope", () => {
+    const missingScope = resolveConfig(
+      workflow({
+        tracker: {
+          kind: "linear",
+          api_key: "token",
+        },
+      }),
+      {},
+    );
+
+    const missingScopeResult = validateDispatchConfig(missingScope);
+    expect(missingScopeResult.ok).toBeFalse();
+    expect(missingScopeResult.errorCode).toBe("missing_linear_scope");
+
+    const teamScoped = resolveConfig(
+      workflow({
+        tracker: {
+          kind: "linear",
+          api_key: "token",
+          team_key: "PIP",
+        },
+      }),
+      {},
+    );
+
+    expect(validateDispatchConfig(teamScoped)).toEqual({ ok: true });
+  });
+
   test("normalizes repositories and selects a single primary repository", () => {
     const config = resolveConfig(
       workflow({
@@ -135,5 +164,37 @@ describe("config", () => {
         primary: true,
       },
     ]);
+  });
+
+  test("derives workflow identity from workflow path and allows explicit workflow.id override", () => {
+    const inferred = resolveConfig(
+      workflow({
+        tracker: {
+          kind: "memory",
+        },
+      }),
+      {},
+      null,
+      "/tmp/workflows/WORKFLOW.linear.team-review.local.md",
+    );
+
+    expect(inferred.workflowId).toBe("WORKFLOW.linear.team-review.local");
+    expect(inferred.workflowPath).toBe("/tmp/workflows/WORKFLOW.linear.team-review.local.md");
+
+    const explicit = resolveConfig(
+      workflow({
+        workflow: {
+          id: "pipes-review",
+        },
+        tracker: {
+          kind: "memory",
+        },
+      }),
+      {},
+      null,
+      "/tmp/workflows/WORKFLOW.linear.team-review.local.md",
+    );
+
+    expect(explicit.workflowId).toBe("pipes-review");
   });
 });
