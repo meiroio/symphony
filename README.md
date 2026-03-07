@@ -30,14 +30,12 @@ Tell your favorite coding agent to build Symphony in a programming language of y
 Check out [bun/README.md](bun/README.md) for instructions on how to set up your environment
 and run the Bun-based Symphony implementation in this repository.
 
-### Option 3. Use the Elixir implementation as reference only
+### Option 3. Use the original Elixir reference implementation
 
-Check out [elixir/README.md](elixir/README.md) if you want inspiration for behavior or parity
-checks. The Elixir implementation is kept as an experimental reference and is not required to run
-or validate the Bun service.
+The Elixir implementation is not included in this repository anymore, but the original reference
+material still exists upstream:
 
-> Set up Symphony for my repository based on
-> https://github.com/openai/symphony/blob/main/elixir/README.md
+- [openai/symphony Elixir reference](https://github.com/openai/symphony/tree/main/elixir)
 
 ---
 

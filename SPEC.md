@@ -1,6 +1,6 @@
 # Symphony Service Specification
 
-Status: Draft v1 (language-agnostic)
+Status: Draft v2 (language-agnostic, Bun-aligned)
 
 Purpose: Define a service that orchestrates coding agents to get project work done.
 
@@ -94,11 +94,22 @@ Important boundary:
    - Launches the coding agent app-server client.
    - Streams agent updates back to the orchestrator.
 
-7. `Status Surface` (optional)
+7. `Repository Bootstrap` (workflow-configured)
+   - Optionally clones one or more repositories into each issue workspace.
+   - Reuses existing clones and synchronizes clean trees via `git fetch` + `git pull --ff-only`.
+   - Skips sync if local changes are present.
+
+8. `Status Surface` (optional)
    - Presents human-readable runtime status (for example terminal output, dashboard, or other
      operator-facing view).
 
-8. `Logging`
+9. `Multi-Workflow Dashboard` (optional extension)
+   - When multiple workflow files run in one process, exposes an aggregate UI and API for:
+     - workflow list
+     - click-through workflow detail
+     - refresh-all control
+
+10. `Logging`
    - Emits structured runtime logs to one or more configured sinks.
 
 ### 3.2 Abstraction Levels
@@ -129,7 +140,7 @@ Symphony is easiest to port when kept in these layers:
 
 - Issue tracker API (Linear for `tracker.kind: linear` in this specification version).
 - Local filesystem for workspaces and logs.
-- Optional workspace population tooling (for example Git CLI, if used).
+- Git CLI when workflow `repositories` are configured.
 - Coding-agent executable that supports JSON-RPC-like app-server mode over stdio.
 - Host environment authentication for the issue tracker and coding agent.
 
@@ -165,6 +176,10 @@ Fields:
     - `state` (string or null)
 - `created_at` (timestamp or null)
 - `updated_at` (timestamp or null)
+- `assignee_id` (string or null)
+  - Tracker assignee identity after normalization.
+- `assigned_to_worker` (boolean)
+  - `true` when assignee filter allows dispatch for this issue.
 
 #### 4.1.2 Workflow Definition
 
@@ -183,10 +198,17 @@ Examples:
 
 - poll interval
 - workspace root
+- repository bootstrap definitions
 - active and terminal issue states
+- required label filters
+- assignee routing filter
 - concurrency limits
+- continuation-state rules
 - coding-agent executable/args/timeouts
 - workspace hooks
+- prompt variables (`prompt.variables`)
+- workflow identity (`workflow.id`)
+- optional HTTP server options (`server.host`, `server.port`)
 
 #### 4.1.4 Workspace
 
@@ -257,7 +279,9 @@ Fields:
 - `poll_interval_ms` (current effective poll interval)
 - `max_concurrent_agents` (current effective global concurrency limit)
 - `running` (map `issue_id -> running entry`)
-- `claimed` (set of issue IDs reserved/running/retrying)
+- `claimed` (map `issue_id -> claim fingerprint`)
+  - Fingerprint includes normalized state and `updated_at` timestamp.
+  - Prevents duplicate dispatch while allowing redispatch when issue state or recency changes.
 - `retry_attempts` (map `issue_id -> RetryEntry`)
 - `completed` (set of issue IDs; bookkeeping only, not dispatch gating)
 - `codex_totals` (aggregate tokens + runtime seconds)
@@ -318,23 +342,28 @@ Returned workflow object:
 
 Top-level keys:
 
+- `workflow`
 - `tracker`
 - `polling`
 - `workspace`
+- `repositories`
 - `hooks`
 - `agent`
 - `codex`
+- `server`
+- `prompt`
 
 Unknown keys should be ignored for forward compatibility.
 
 Note:
 
-- The workflow front matter is extensible. Optional extensions may define additional top-level keys
-  (for example `server`) without changing the core schema above.
+- The workflow front matter is extensible.
 - Extensions should document their field schema, defaults, validation rules, and whether changes
   apply dynamically or require restart.
-- Common extension: `server.port` (integer) enables the optional HTTP server described in Section
-  13.7.
+- Common extensions in the Bun implementation include:
+  - `server.port` / `server.host` for observability HTTP binding.
+  - `workflow.id` for stable workflow identity in logs and APIs.
+  - `prompt.variables` exposed to templates as `vars.*`.
 
 #### 5.3.1 `tracker` (object)
 
@@ -342,7 +371,7 @@ Fields:
 
 - `kind` (string)
   - Required for dispatch.
-  - Current supported value: `linear`
+  - Supported values: `linear`, `memory` (`memory` is primarily for tests/local harnesses).
 - `endpoint` (string)
   - Default for `tracker.kind == "linear"`: `https://api.linear.app/graphql`
 - `api_key` (string)
@@ -350,9 +379,21 @@ Fields:
   - Canonical environment variable for `tracker.kind == "linear"`: `LINEAR_API_KEY`.
   - If `$VAR_NAME` resolves to an empty string, treat the key as missing.
 - `project_slug` (string)
-  - Required for dispatch when `tracker.kind == "linear"`.
+  - Optional Linear scope selector (project-level routing).
+- `team_key` (string)
+  - Optional Linear scope selector (team-level routing by team key).
+- `team_id` (string)
+  - Optional Linear scope selector (team-level routing by team ID).
+- Scope requirement for `tracker.kind == "linear"`:
+  - At least one of `project_slug`, `team_key`, or `team_id` is required.
+- `assignee` (string)
+  - Optional assignee filter.
+  - Supports explicit Linear user ID, or special value `me` (resolved via viewer query).
+- `required_labels` (list of strings or comma-separated string)
+  - Optional AND filter; issue must contain all listed labels (case-insensitive).
 - `active_states` (list of strings or comma-separated string)
   - Default: `Todo`, `In Progress`
+  - Supports wildcard `*` meaning "any non-terminal state".
 - `terminal_states` (list of strings or comma-separated string)
   - Default: `Closed`, `Cancelled`, `Canceled`, `Duplicate`, `Done`
 
@@ -405,6 +446,9 @@ Fields:
 - `max_concurrent_agents` (integer or string integer)
   - Default: `10`
   - Changes should be re-applied at runtime and affect subsequent dispatch decisions.
+- `max_turns` (integer or string integer)
+  - Default: `20`
+  - Maximum turns per worker session.
 - `max_retry_backoff_ms` (integer or string integer)
   - Default: `300000` (5 minutes)
   - Changes should be re-applied at runtime and affect future retry scheduling.
@@ -412,6 +456,11 @@ Fields:
   - Default: empty map.
   - State keys are normalized (`trim` + `lowercase`) for lookup.
   - Invalid entries (non-positive or non-numeric) are ignored.
+- `continuation_states` (list of strings or comma-separated string)
+  - Default: empty list (`[]`).
+  - If empty, successful worker exits schedule continuation retries unconditionally.
+  - If non-empty, successful worker exits schedule continuation retries only when the issue state
+    matches this allowlist (supports wildcard `*` for any non-terminal state).
 
 #### 5.3.6 `codex` (object)
 
@@ -443,6 +492,57 @@ fields locally if they want stricter startup checks.
   - Default: `300000` (5 minutes)
   - If `<= 0`, stall detection is disabled.
 
+#### 5.3.7 `repositories` (array, optional)
+
+Each repository entry defines bootstrap/sync behavior for a workspace.
+
+Fields per entry:
+
+- `id` (string, optional)
+  - Default: `repo_<index>`.
+- `remote` (string, required)
+  - Git remote URL; supports literal or `$VAR_NAME`.
+- `checkout` (string, optional)
+  - Default: `main`.
+  - Supports env-backed value (for example `$SYMPHONY_DEFAULT_BRANCH`).
+- `target` (string, optional)
+  - Default: `.` (workspace root).
+- `primary` (boolean, optional)
+  - If omitted on all entries, first repository becomes primary.
+
+Behavior:
+
+- On first workspace creation, each configured repository is cloned to `target`.
+- On reuse, if `target` is already a git repository and working tree is clean:
+  - `git fetch --prune origin`
+  - `git pull --ff-only origin <branch>`
+- If local changes are present, sync is skipped for safety.
+
+#### 5.3.8 `server` (object, optional extension)
+
+Fields:
+
+- `host` (string)
+  - Default: `127.0.0.1`.
+- `port` (integer or null)
+  - Optional single-workflow observability server bind.
+  - `0` may be used for ephemeral local bind.
+
+#### 5.3.9 `workflow` (object, optional extension)
+
+Fields:
+
+- `id` (string, optional)
+  - Stable workflow identity for logs/status APIs.
+  - If omitted, inferred from workflow filename.
+
+#### 5.3.10 `prompt` (object, optional extension)
+
+Fields:
+
+- `variables` (map)
+  - Arbitrary template variables available as `vars.*` in prompt rendering.
+
 ### 5.4 Prompt Template Contract
 
 The Markdown body of `WORKFLOW.md` is the per-issue prompt template.
@@ -460,6 +560,12 @@ Template input variables:
 - `attempt` (integer or null)
   - `null`/absent on first attempt.
   - Integer on retry or continuation run.
+- `workspace` (object)
+  - Includes `workspace.path`.
+- `repositories` (array)
+  - Effective repository definitions enriched with absolute `path` fields.
+- `vars` (object)
+  - Values from `prompt.variables`.
 
 Fallback prompt behavior:
 
@@ -543,22 +649,29 @@ Validation checks:
 
 - Workflow file can be loaded and parsed.
 - `tracker.kind` is present and supported.
-- `tracker.api_key` is present after `$` resolution.
-- `tracker.project_slug` is present when required by the selected tracker kind.
+- If `tracker.kind == "linear"`:
+  - `tracker.api_key` is present after `$` resolution.
+  - At least one scope selector is present: `project_slug` or `team_key` or `team_id`.
 - `codex.command` is present and non-empty.
 
 ### 6.4 Config Fields Summary (Cheat Sheet)
 
 This section is intentionally redundant so a coding agent can implement the config layer quickly.
 
-- `tracker.kind`: string, required, currently `linear`
+- `tracker.kind`: string, required, currently `linear` or `memory`
 - `tracker.endpoint`: string, default `https://api.linear.app/graphql` when `tracker.kind=linear`
 - `tracker.api_key`: string or `$VAR`, canonical env `LINEAR_API_KEY` when `tracker.kind=linear`
-- `tracker.project_slug`: string, required when `tracker.kind=linear`
+- `tracker.project_slug`: string, optional linear scope
+- `tracker.team_key`: string, optional linear scope
+- `tracker.team_id`: string, optional linear scope
+- `tracker.assignee`: string, optional (`me` or assignee id)
+- `tracker.required_labels`: list/string, default `[]`
 - `tracker.active_states`: list/string, default `Todo, In Progress`
+  - wildcard `*` supported for any non-terminal state
 - `tracker.terminal_states`: list/string, default `Closed, Cancelled, Canceled, Duplicate, Done`
 - `polling.interval_ms`: integer, default `30000`
 - `workspace.root`: path, default `<system-temp>/symphony_workspaces`
+- `repositories[]`: optional repository bootstrap/sync definitions
 - `hooks.after_create`: shell script or null
 - `hooks.before_run`: shell script or null
 - `hooks.after_run`: shell script or null
@@ -568,6 +681,7 @@ This section is intentionally redundant so a coding agent can implement the conf
 - `agent.max_turns`: integer, default `20`
 - `agent.max_retry_backoff_ms`: integer, default `300000` (5m)
 - `agent.max_concurrent_agents_by_state`: map of positive integers, default `{}`
+- `agent.continuation_states`: list/string, default `[]` (empty means "all active states")
 - `codex.command`: shell command string, default `codex app-server`
 - `codex.approval_policy`: Codex `AskForApproval` value, default implementation-defined
 - `codex.thread_sandbox`: Codex `SandboxMode` value, default implementation-defined
@@ -575,6 +689,9 @@ This section is intentionally redundant so a coding agent can implement the conf
 - `codex.turn_timeout_ms`: integer, default `3600000`
 - `codex.read_timeout_ms`: integer, default `5000`
 - `codex.stall_timeout_ms`: integer, default `300000`
+- `workflow.id` (extension): string, optional stable workflow identity
+- `prompt.variables` (extension): map exposed as `vars.*` in templates
+- `server.host` (extension): string, default `127.0.0.1`
 - `server.port` (extension): integer, optional; enables the optional HTTP server, `0` may be used
   for ephemeral local bind, and CLI `--port` overrides it
 
@@ -593,7 +710,8 @@ claim state.
 
 2. `Claimed`
    - Orchestrator has reserved the issue to prevent duplicate dispatch.
-   - In practice, claimed issues are either `Running` or `RetryQueued`.
+   - Claim entry stores a fingerprint (`normalized_state`, `updated_at`).
+   - If fingerprint changes, issue becomes redispatch-eligible even if previously claimed.
 
 3. `Running`
    - Worker task exists and the issue is tracked in `running` map.
@@ -615,9 +733,10 @@ Important nuance:
 - The first turn should use the full rendered task prompt.
 - Continuation turns should send only continuation guidance to the existing thread, not resend the
   original task prompt that is already present in thread history.
-- Once the worker exits normally, the orchestrator still schedules a short continuation retry
-  (about 1 second) so it can re-check whether the issue remains active and needs another worker
-  session.
+- After worker exit, continuation retry behavior is state-aware:
+  - If `agent.continuation_states` is empty, schedule a short continuation retry (about 1 second).
+  - If configured, schedule continuation retry only when the issue state matches that allowlist.
+  - Otherwise keep the claim and wait for issue state/`updated_at` changes before redispatch.
 
 ### 7.2 Run Attempt Lifecycle
 
@@ -648,8 +767,8 @@ Distinct terminal reasons are important because retry logic and logs differ.
 - `Worker Exit (normal)`
   - Remove running entry.
   - Update aggregate runtime totals.
-  - Schedule continuation retry (attempt `1`) after the worker exhausts or finishes its in-process
-    turn loop.
+  - Schedule continuation retry (attempt `1`) only when allowed by
+    `agent.continuation_states` (or unconditionally when that list is empty).
 
 - `Worker Exit (abnormal)`
   - Remove running entry.
@@ -672,6 +791,8 @@ Distinct terminal reasons are important because retry logic and logs differ.
 
 - The orchestrator serializes state mutations through one authority to avoid duplicate dispatch.
 - `claimed` and `running` checks are required before launching any worker.
+- `claimed` entries are fingerprinted by issue state and `updated_at` to allow safe redispatch after
+  human/automation updates.
 - Reconciliation runs before dispatch on every tick.
 - Restart recovery is tracker-driven and filesystem-driven (no durable orchestrator DB required).
 - Startup terminal cleanup removes stale workspaces for issues already in terminal states.
@@ -689,7 +810,8 @@ Tick sequence:
 
 1. Reconcile running issues.
 2. Run dispatch preflight validation.
-3. Fetch candidate issues from tracker using active states.
+3. Fetch candidate issues from tracker using configured scope (project/team) and active-state rules
+   (including wildcard `*` when configured).
 4. Sort issues by dispatch priority.
 5. Dispatch eligible issues while slots remain.
 6. Notify observability/status consumers of state changes.
@@ -702,9 +824,14 @@ first.
 An issue is dispatch-eligible only if all are true:
 
 - It has `id`, `identifier`, `title`, and `state`.
-- Its state is in `active_states` and not in `terminal_states`.
+- It is assigned to the configured worker scope (`assigned_to_worker == true`).
+- Required labels pass:
+  - If `required_labels` is non-empty, issue labels must include all required labels.
+- State eligibility passes:
+  - If `active_states` contains `*`, issue state must not be terminal.
+  - Otherwise state must be in `active_states` and not terminal.
 - It is not already in `running`.
-- It is not already in `claimed`.
+- It is not already in `claimed` with the same state/`updated_at` fingerprint.
 - Global concurrency slots are available.
 - Per-state concurrency slots are available.
 - Blocker rule for `Todo` state passes:
@@ -751,6 +878,13 @@ Retry handling behavior:
    - Dispatch if slots are available.
    - Otherwise requeue with error `no available orchestrator slots`.
 5. If found but no longer active, release claim.
+
+Normal completion behavior:
+
+- If state is allowed by `agent.continuation_states` (or list is empty), enqueue continuation retry
+  with short fixed delay.
+- Otherwise keep claim and do not enqueue immediate continuation retry; redispatch only after issue
+  fingerprint changes.
 
 Note:
 
@@ -827,20 +961,26 @@ Notes:
 - Workspace preparation beyond directory creation (for example dependency bootstrap, checkout/sync,
   code generation) is implementation-defined and is typically handled via hooks.
 
-### 9.3 Optional Workspace Population (Implementation-Defined)
+### 9.3 Repository Bootstrap and Sync
 
-The spec does not require any built-in VCS or repository bootstrap behavior.
+When `repositories` are configured in workflow front matter, repository preparation is part of
+workspace startup:
 
-Implementations may populate or synchronize the workspace using implementation-defined logic and/or
-hooks (for example `after_create` and/or `before_run`).
+1. Resolve `target` under workspace root.
+2. If `target/.git` is absent, clone `remote` with configured `checkout` branch.
+3. If git repository already exists:
+   - run `git status --porcelain`
+   - if clean, run `git fetch --prune origin` and `git pull --ff-only origin <branch>`
+   - if dirty, skip sync and continue safely.
 
 Failure handling:
 
-- Workspace population/synchronization failures return an error for the current attempt.
-- If failure happens while creating a brand-new workspace, implementations may remove the partially
-  prepared directory.
-- Reused workspaces should not be destructively reset on population failure unless that policy is
-  explicitly chosen and documented.
+- Clone failure fails the run attempt with repository context in error details/logs.
+- Fetch/pull failures should be surfaced in logs and may skip sync while preserving workspace.
+- Existing workspaces must not be destructively reset during sync failures.
+
+Hooks remain useful for additional bootstrap logic, but repository clone/sync no longer depends on
+hooks alone.
 
 ### 9.4 Workspace Hooks
 
@@ -1147,7 +1287,9 @@ Note:
 An implementation must support these tracker adapter operations:
 
 1. `fetch_candidate_issues()`
-   - Return issues in configured active states for a configured project.
+   - Return issues in configured active states for configured scope
+     (`project_slug` or `team_key` or `team_id`).
+   - Apply optional assignee filter and include label/blocker metadata.
 
 2. `fetch_issues_by_states(state_names)`
    - Used for startup terminal cleanup.
@@ -1162,8 +1304,14 @@ Linear-specific requirements for `tracker.kind == "linear"`:
 - `tracker.kind == "linear"`
 - GraphQL endpoint (default `https://api.linear.app/graphql`)
 - Auth token sent in `Authorization` header
-- `tracker.project_slug` maps to Linear project `slugId`
-- Candidate issue query filters project using `project: { slugId: { eq: $projectSlug } }`
+- Scope selection priority:
+  - project scope (`project_slug`) when present
+  - otherwise team scope (`team_key` or `team_id`)
+- Candidate issue query filters by selected scope.
+- Active state filter may be omitted when wildcard `active_states: ["*"]` is configured.
+- Optional assignee filter supports:
+  - explicit assignee ID
+  - `me` resolved from Linear viewer identity
 - Issue-state refresh query uses GraphQL issue IDs with variable type `[ID!]`
 - Pagination required for candidate issues
 - Page size default: `50`
@@ -1193,8 +1341,8 @@ Additional normalization details:
 Recommended error categories:
 
 - `unsupported_tracker_kind`
-- `missing_tracker_api_key`
-- `missing_tracker_project_slug`
+- `missing_linear_api_token` (or equivalent missing tracker API key error)
+- `missing_linear_scope` (or equivalent missing scope error)
 - `linear_api_request` (transport failures)
 - `linear_api_status` (non-200 HTTP)
 - `linear_graphql_errors`
@@ -1228,6 +1376,9 @@ Inputs to prompt rendering:
 - `workflow.prompt_template`
 - normalized `issue` object
 - optional `attempt` integer (retry/continuation metadata)
+- `workspace.path`
+- resolved repository list (with absolute repository paths)
+- `prompt.variables` as `vars.*`
 
 ### 12.2 Rendering Rules
 
@@ -1366,8 +1517,8 @@ Enablement (extension):
 
 - Start the HTTP server when a CLI `--port` argument is provided.
 - Start the HTTP server when `server.port` is present in `WORKFLOW.md` front matter.
-- `server.port` is extension configuration and is intentionally not part of the core front-matter
-  schema in Section 5.3.
+- In multi-workflow process mode, an aggregate dashboard listener may be started (for example via
+  `--dashboard-port` or `SYMPHONY_DASHBOARD_PORT`).
 - Precedence: CLI `--port` overrides `server.port` when both are present.
 - `server.port` must be an integer. Positive values bind that port. `0` may be used to request an
   ephemeral port for local development and tests.
@@ -1520,6 +1671,15 @@ API design notes:
 - If the dashboard is a client-side app, it should consume this API rather than duplicating state
   logic.
 
+Multi-workflow extension endpoints (aggregate dashboard):
+
+- `GET /api/v1/workflows`
+  - List workflows currently loaded in the process, with per-workflow summary counts and metadata.
+- `GET /api/v1/workflows/<key>`
+  - Return one workflow detail payload, typically equivalent to that workflow's `/api/v1/state`.
+- `POST /api/v1/refresh`
+  - Trigger refresh across all workflows in the process (best-effort, coalescing allowed).
+
 ## 14. Failure Model and Recovery Strategy
 
 ### 14.1 Failure Classes
@@ -1527,12 +1687,12 @@ API design notes:
 1. `Workflow/Config Failures`
    - Missing `WORKFLOW.md`
    - Invalid YAML front matter
-   - Unsupported tracker kind or missing tracker credentials/project slug
+   - Unsupported tracker kind or missing tracker credentials/scope
    - Missing coding-agent executable
 
 2. `Workspace Failures`
    - Workspace directory creation failure
-   - Workspace population/synchronization failure (implementation-defined; may come from hooks)
+   - Repository clone/synchronization failure (workflow-configured `repositories`)
    - Invalid workspace path configuration
    - Hook timeout/failure
 
@@ -1689,7 +1849,7 @@ function start_service():
     poll_interval_ms: get_config_poll_interval_ms(),
     max_concurrent_agents: get_config_max_concurrent_agents(),
     running: {},
-    claimed: set(),
+    claimed: map(),  # issue_id -> {state, updated_at_ms}
     retry_attempts: {},
     completed: set(),
     codex_totals: {input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
@@ -1799,7 +1959,10 @@ function dispatch_issue(issue, state, attempt):
     started_at: now_utc()
   }
 
-  state.claimed.add(issue.id)
+  state.claimed[issue.id] = {
+    state: normalize_state(issue.state),
+    updated_at_ms: issue.updated_at_ms_or_null
+  }
   state.retry_attempts.remove(issue.id)
   return state
 ```
@@ -1873,10 +2036,11 @@ on_worker_exit(issue_id, reason, state):
 
   if reason == normal:
     state.completed.add(issue_id)  # bookkeeping only
-    state = schedule_retry(state, issue_id, 1, {
-      identifier: running_entry.identifier,
-      delay_type: continuation
-    })
+    if should_continue_for_state(running_entry.issue.state, config.agent.continuation_states):
+      state = schedule_retry(state, issue_id, 1, {
+        identifier: running_entry.identifier,
+        delay_type: continuation
+      })
   else:
     state = schedule_retry(state, issue_id, next_attempt_from(running_entry), {
       identifier: running_entry.identifier,
@@ -1942,13 +2106,14 @@ Unless otherwise noted, Sections 17.1 through 17.7 are `Core Conformance`. Bulle
 - Invalid YAML front matter returns typed error
 - Front matter non-map returns typed error
 - Config defaults apply when optional values are missing
-- `tracker.kind` validation enforces currently supported kind (`linear`)
+- `tracker.kind` validation enforces supported kinds (`linear`, optional `memory` test adapter)
 - `tracker.api_key` works (including `$VAR` indirection)
 - `$VAR` resolution works for tracker API key and path values
+- `$VAR` resolution works for repository checkout/remote values
 - `~` path expansion works
 - `codex.command` is preserved as a shell command string
 - Per-state concurrency override map normalizes state names and ignores invalid values
-- Prompt template renders `issue` and `attempt`
+- Prompt template renders `issue`, `attempt`, `workspace`, `repositories`, and `vars`
 - Prompt rendering fails on unknown variables (strict mode)
 
 ### 17.2 Workspace Manager and Safety
@@ -1958,7 +2123,7 @@ Unless otherwise noted, Sections 17.1 through 17.7 are `Core Conformance`. Bulle
 - Existing workspace directory is reused
 - Existing non-directory path at workspace location is handled safely (replace or fail per
   implementation policy)
-- Optional workspace population/synchronization errors are surfaced
+- Repository clone/sync errors are surfaced with repository context
 - Temporary artifacts (`tmp`, `.elixir_ls`) are removed during prep
 - `after_create` hook runs only on new workspace creation
 - `before_run` hook runs before each attempt and failure/timeouts abort the current attempt
@@ -1969,8 +2134,9 @@ Unless otherwise noted, Sections 17.1 through 17.7 are `Core Conformance`. Bulle
 
 ### 17.3 Issue Tracker Client
 
-- Candidate issue fetch uses active states and project slug
-- Linear query uses the specified project filter field (`slugId`)
+- Candidate issue fetch supports scope by project slug or team key/team id
+- Linear query uses project `slugId` filter for project scope and team filter for team scope
+- Wildcard active state uses scope-only query without explicit state filter
 - Empty `fetch_issues_by_states([])` returns empty without API call
 - Pagination preserves order across multiple pages
 - Blockers are normalized from inverse relations of type `blocks`
@@ -1978,6 +2144,8 @@ Unless otherwise noted, Sections 17.1 through 17.7 are `Core Conformance`. Bulle
 - Issue state refresh by ID returns minimal normalized issues
 - Issue state refresh query uses GraphQL ID typing (`[ID!]`) as specified in Section 11.2
 - Error mapping for request errors, non-200, GraphQL errors, malformed payloads
+- Assignee filtering (`me` and explicit assignee id) normalizes to `assigned_to_worker`
+- Required-label filtering (AND semantics) is applied during candidate eligibility
 
 ### 17.4 Orchestrator Dispatch, Reconciliation, and Retry
 
@@ -1988,12 +2156,13 @@ Unless otherwise noted, Sections 17.1 through 17.7 are `Core Conformance`. Bulle
 - Non-active state stops running agent without workspace cleanup
 - Terminal state stops running agent and cleans workspace
 - Reconciliation with no running issues is a no-op
-- Normal worker exit schedules a short continuation retry (attempt 1)
+- Normal worker exit schedules continuation retry according to `agent.continuation_states`
 - Abnormal worker exit increments retries with 10s-based exponential backoff
 - Retry backoff cap uses configured `agent.max_retry_backoff_ms`
 - Retry queue entries include attempt, due time, identifier, and error
 - Stall detection kills stalled sessions and schedules retry
 - Slot exhaustion requeues retries with explicit error reason
+- Claimed fingerprint changes (state/updated_at) allow redispatch
 - If a snapshot API is implemented, it returns running rows, retry rows, token totals, and rate
   limits
 - If a snapshot API is implemented, timeout/unavailable cases are surfaced
