@@ -110,4 +110,30 @@ describe("linear client scope selection", () => {
       "symphony-2f9fcdc281e6",
     );
   });
+
+  test("uses scope-only query when wildcard active state is configured", async () => {
+    let capturedBody: Record<string, unknown> | null = null;
+
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      const rawBody = typeof init?.body === "string" ? init.body : "{}";
+      capturedBody = JSON.parse(rawBody) as Record<string, unknown>;
+      return mockIssuesResponse();
+    }) as typeof fetch;
+
+    const client = new LinearClient({
+      endpoint,
+      apiKey: "token",
+      projectSlug: null,
+      teamKey: "PIP",
+      teamId: null,
+      assignee: null,
+    });
+
+    await client.fetchCandidateIssues(["*"]);
+
+    expect(capturedBody).not.toBeNull();
+    const captured = capturedBody as unknown as Record<string, unknown>;
+    expect(String(captured.query ?? "")).toContain("query SymphonyLinearPollByTeamKeyAll");
+    expect((captured.variables as Record<string, unknown>).stateNames).toBeUndefined();
+  });
 });

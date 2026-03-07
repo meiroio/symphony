@@ -23,7 +23,7 @@ workspace:
 repositories:
   - id: app
     remote: "<your-repository-ssh-or-https-url>"
-    checkout: main
+    checkout: "$SYMPHONY_DEFAULT_BRANCH"
     target: .
     primary: true
 agent:
@@ -101,7 +101,7 @@ Required execution loop:
 9. Follow branch/PR git flow:
    - Never push directly to `main` or `master`.
    - Commit on an issue-scoped branch only.
-   - Push branch to remote and open/update a PR targeting `main`.
+   - Push branch to remote and open/update a PR targeting your configured default branch.
    - Include PR URL in workpad and final report when available.
 
 Finalization requirements:

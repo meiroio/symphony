@@ -168,6 +168,7 @@ const buildConfig = (workspaceRoot: string, logPath: string, mode: string): Effe
       teamKey: null,
       teamId: null,
       assignee: null,
+      requiredLabels: [],
       activeStates: ["Todo", "In Progress"],
       terminalStates: ["Done", "Closed"],
     },
@@ -189,6 +190,7 @@ const buildConfig = (workspaceRoot: string, logPath: string, mode: string): Effe
       maxTurns: 1,
       maxRetryBackoffMs: 300000,
       maxConcurrentAgentsByState: {},
+      continuationStates: [],
     },
     codex: {
       command,

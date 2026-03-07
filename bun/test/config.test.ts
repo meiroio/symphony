@@ -65,6 +65,19 @@ describe("config", () => {
     });
   });
 
+  test("parses continuation states for state-aware auto-retry", () => {
+    const config = resolveConfig(
+      workflow({
+        agent: {
+          continuation_states: ["In Progress", "Code Review"],
+        },
+      }),
+      {},
+    );
+
+    expect(config.agent.continuationStates).toEqual(["In Progress", "Code Review"]);
+  });
+
   test("dispatch validation checks required fields", () => {
     const invalid = resolveConfig(
       workflow({
@@ -164,6 +177,96 @@ describe("config", () => {
         primary: true,
       },
     ]);
+  });
+
+  test("resolves env-backed repository checkout with workflow and global branch fallbacks", () => {
+    const config = resolveConfig(
+      workflow({
+        repositories: [
+          {
+            id: "api",
+            remote: "git@work:acme/api.git",
+            checkout: "$API_DEFAULT_BRANCH",
+            target: ".",
+          },
+          {
+            id: "docs",
+            remote: "git@work:acme/docs.git",
+            checkout: "$MISSING_BRANCH_ENV",
+            target: "deps/docs",
+          },
+          {
+            id: "ops",
+            remote: "git@work:acme/ops.git",
+            target: "deps/ops",
+          },
+        ],
+      }),
+      {
+        API_DEFAULT_BRANCH: "release",
+        SYMPHONY_DEFAULT_BRANCH: "dev",
+      },
+    );
+
+    expect(config.repositories).toEqual([
+      {
+        id: "api",
+        remote: "git@work:acme/api.git",
+        checkout: "release",
+        target: ".",
+        primary: true,
+      },
+      {
+        id: "docs",
+        remote: "git@work:acme/docs.git",
+        checkout: "dev",
+        target: "deps/docs",
+        primary: false,
+      },
+      {
+        id: "ops",
+        remote: "git@work:acme/ops.git",
+        checkout: "dev",
+        target: "deps/ops",
+        primary: false,
+      },
+    ]);
+  });
+
+  test("normalizes required labels to lowercase", () => {
+    const config = resolveConfig(
+      workflow({
+        tracker: {
+          kind: "memory",
+          required_labels: [" Code-Review ", "QA_READY"],
+        },
+      }),
+      {},
+    );
+
+    expect(config.tracker.requiredLabels).toEqual(["code-review", "qa_ready"]);
+  });
+
+  test("passes prompt variables through workflow config", () => {
+    const config = resolveConfig(
+      workflow({
+        prompt: {
+          variables: {
+            testing_command: "bun run test:e2e",
+            review_mode: "strict",
+          },
+        },
+        tracker: {
+          kind: "memory",
+        },
+      }),
+      {},
+    );
+
+    expect(config.promptVariables).toEqual({
+      testing_command: "bun run test:e2e",
+      review_mode: "strict",
+    });
   });
 
   test("derives workflow identity from workflow path and allows explicit workflow.id override", () => {

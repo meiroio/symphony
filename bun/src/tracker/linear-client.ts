@@ -39,6 +39,41 @@ query SymphonyLinearPollByProject($projectSlug: String!, $stateNames: [String!]!
 }
 `;
 
+const CANDIDATE_BY_PROJECT_ALL_QUERY = `
+query SymphonyLinearPollByProjectAll($projectSlug: String!, $first: Int!, $relationFirst: Int!, $after: String) {
+  issues(filter: {project: {slugId: {eq: $projectSlug}}}, first: $first, after: $after) {
+    nodes {
+      id
+      identifier
+      title
+      description
+      priority
+      state { name }
+      branchName
+      url
+      assignee { id }
+      labels { nodes { name } }
+      inverseRelations(first: $relationFirst) {
+        nodes {
+          type
+          issue {
+            id
+            identifier
+            state { name }
+          }
+        }
+      }
+      createdAt
+      updatedAt
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+`;
+
 const CANDIDATE_BY_TEAM_KEY_QUERY = `
 query SymphonyLinearPollByTeamKey($teamKey: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $after: String) {
   issues(filter: {team: {key: {eq: $teamKey}}, state: {name: {in: $stateNames}}}, first: $first, after: $after) {
@@ -74,9 +109,79 @@ query SymphonyLinearPollByTeamKey($teamKey: String!, $stateNames: [String!]!, $f
 }
 `;
 
+const CANDIDATE_BY_TEAM_KEY_ALL_QUERY = `
+query SymphonyLinearPollByTeamKeyAll($teamKey: String!, $first: Int!, $relationFirst: Int!, $after: String) {
+  issues(filter: {team: {key: {eq: $teamKey}}}, first: $first, after: $after) {
+    nodes {
+      id
+      identifier
+      title
+      description
+      priority
+      state { name }
+      branchName
+      url
+      assignee { id }
+      labels { nodes { name } }
+      inverseRelations(first: $relationFirst) {
+        nodes {
+          type
+          issue {
+            id
+            identifier
+            state { name }
+          }
+        }
+      }
+      createdAt
+      updatedAt
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+`;
+
 const CANDIDATE_BY_TEAM_ID_QUERY = `
 query SymphonyLinearPollByTeamId($teamId: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $after: String) {
   issues(filter: {team: {id: {eq: $teamId}}, state: {name: {in: $stateNames}}}, first: $first, after: $after) {
+    nodes {
+      id
+      identifier
+      title
+      description
+      priority
+      state { name }
+      branchName
+      url
+      assignee { id }
+      labels { nodes { name } }
+      inverseRelations(first: $relationFirst) {
+        nodes {
+          type
+          issue {
+            id
+            identifier
+            state { name }
+          }
+        }
+      }
+      createdAt
+      updatedAt
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+`;
+
+const CANDIDATE_BY_TEAM_ID_ALL_QUERY = `
+query SymphonyLinearPollByTeamIdAll($teamId: String!, $first: Int!, $relationFirst: Int!, $after: String) {
+  issues(filter: {team: {id: {eq: $teamId}}}, first: $first, after: $after) {
     nodes {
       id
       identifier
@@ -184,7 +289,12 @@ export class LinearClient {
     const scope = this.resolveScopeOrThrow();
 
     const assigneeFilter = await this.routingAssigneeFilter();
-    return this.fetchByStates(scope, activeStates, assigneeFilter);
+    const normalizedStates = activeStates
+      .map((state) => state.trim())
+      .filter((state) => state.length > 0);
+    const useStateFilter = !normalizedStates.some((state) => state === "*");
+
+    return this.fetchByStates(scope, useStateFilter ? normalizedStates : null, assigneeFilter);
   }
 
   async fetchIssuesByStates(stateNames: string[]): Promise<Issue[]> {
@@ -287,22 +397,32 @@ export class LinearClient {
 
   private async fetchByStates(
     scope: LinearScope,
-    stateNames: string[],
+    stateNames: string[] | null,
     assigneeFilter: AssigneeFilter | null,
   ): Promise<Issue[]> {
     let after: string | null = null;
     const allIssues: Issue[] = [];
 
     while (true) {
-      const scopedQuery = this.scopeQuery(scope);
+      const scopedQuery = this.scopeQuery(scope, stateNames !== null);
 
-      const body = await this.graphql(scopedQuery.query, {
-        ...scopedQuery.variables,
-        stateNames,
-        first: ISSUE_PAGE_SIZE,
-        relationFirst: ISSUE_PAGE_SIZE,
-        after,
-      });
+      const body = await this.graphql(
+        scopedQuery.query,
+        stateNames !== null
+          ? {
+              ...scopedQuery.variables,
+              stateNames,
+              first: ISSUE_PAGE_SIZE,
+              relationFirst: ISSUE_PAGE_SIZE,
+              after,
+            }
+          : {
+              ...scopedQuery.variables,
+              first: ISSUE_PAGE_SIZE,
+              relationFirst: ISSUE_PAGE_SIZE,
+              after,
+            },
+      );
 
       const issuesData = asRecord(asRecord(body.data)?.issues);
       const nodes = issuesData?.nodes;
@@ -360,10 +480,13 @@ export class LinearClient {
     );
   }
 
-  private scopeQuery(scope: LinearScope): { query: string; variables: Record<string, unknown> } {
+  private scopeQuery(
+    scope: LinearScope,
+    withStateFilter: boolean,
+  ): { query: string; variables: Record<string, unknown> } {
     if (scope.type === "projectSlug") {
       return {
-        query: CANDIDATE_BY_PROJECT_QUERY,
+        query: withStateFilter ? CANDIDATE_BY_PROJECT_QUERY : CANDIDATE_BY_PROJECT_ALL_QUERY,
         variables: {
           projectSlug: scope.value,
         },
@@ -372,7 +495,7 @@ export class LinearClient {
 
     if (scope.type === "teamKey") {
       return {
-        query: CANDIDATE_BY_TEAM_KEY_QUERY,
+        query: withStateFilter ? CANDIDATE_BY_TEAM_KEY_QUERY : CANDIDATE_BY_TEAM_KEY_ALL_QUERY,
         variables: {
           teamKey: scope.value,
         },
@@ -380,7 +503,7 @@ export class LinearClient {
     }
 
     return {
-      query: CANDIDATE_BY_TEAM_ID_QUERY,
+      query: withStateFilter ? CANDIDATE_BY_TEAM_ID_QUERY : CANDIDATE_BY_TEAM_ID_ALL_QUERY,
       variables: {
         teamId: scope.value,
       },

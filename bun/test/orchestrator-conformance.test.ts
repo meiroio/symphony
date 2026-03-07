@@ -12,6 +12,7 @@ const baseConfig = (): EffectiveConfig => ({
     teamKey: null,
     teamId: null,
     assignee: null,
+    requiredLabels: [],
     activeStates: ["Todo", "In Progress"],
     terminalStates: ["Done", "Closed", "Cancelled", "Canceled", "Duplicate"],
   },
@@ -29,6 +30,7 @@ const baseConfig = (): EffectiveConfig => ({
     maxTurns: 20,
     maxRetryBackoffMs: 300_000,
     maxConcurrentAgentsByState: {},
+    continuationStates: [],
   },
   codex: {
     command: "codex app-server",
@@ -99,6 +101,37 @@ describe("orchestrator conformance logic", () => {
 
     expect(orchestratorTestUtils.isCandidateIssue(blockedTodo, config)).toBeTrue();
     expect(orchestratorTestUtils.isTodoBlockedByNonTerminal(blockedTodo, config)).toBeFalse();
+  });
+
+  test("required labels gate candidate eligibility", () => {
+    const config = baseConfig();
+    config.tracker.requiredLabels = ["codex-review", "qa-ready"];
+
+    const eligible = issue({
+      labels: ["codex-review", "qa-ready", "backend"],
+    });
+
+    const ineligible = issue({
+      labels: ["codex-review"],
+    });
+
+    expect(orchestratorTestUtils.isCandidateIssue(eligible, config)).toBeTrue();
+    expect(orchestratorTestUtils.isCandidateIssue(ineligible, config)).toBeFalse();
+  });
+
+  test("wildcard active state accepts any non-terminal state", () => {
+    const config = baseConfig();
+    config.tracker.activeStates = ["*"];
+
+    const inReview = issue({
+      state: "In Review",
+    });
+    const done = issue({
+      state: "Done",
+    });
+
+    expect(orchestratorTestUtils.isCandidateIssue(inReview, config)).toBeTrue();
+    expect(orchestratorTestUtils.isCandidateIssue(done, config)).toBeFalse();
   });
 
   test("failure backoff grows exponentially and caps at configured max", () => {

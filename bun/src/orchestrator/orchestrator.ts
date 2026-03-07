@@ -16,6 +16,7 @@ import { AppServerClient } from "../codex/app-server";
 import { AgentRunner } from "../agent/agent-runner";
 import { logger } from "../utils/logger";
 import { normalizeIssueState } from "../utils/normalize";
+import { SymphonyError } from "../utils/errors";
 
 const CONTINUATION_RETRY_DELAY_MS = 1_000;
 const FAILURE_RETRY_BASE_MS = 10_000;
@@ -30,6 +31,11 @@ interface RetryMetadata {
   identifier?: string;
   error?: string;
   delayType?: "continuation";
+}
+
+interface ClaimedEntry {
+  state: string;
+  updatedAtMs: number | null;
 }
 
 const EMPTY_TOTALS: CodexTotals = {
@@ -50,7 +56,7 @@ export class Orchestrator {
   private currentConfig: EffectiveConfig | null = null;
 
   private readonly running = new Map<string, RunningEntry>();
-  private readonly claimed = new Set<string>();
+  private readonly claimed = new Map<string, ClaimedEntry>();
   private readonly retryAttempts = new Map<string, RetryEntry>();
   private readonly completed = new Set<string>();
   private codexTotals: CodexTotals = { ...EMPTY_TOTALS };
@@ -392,7 +398,17 @@ export class Orchestrator {
       return false;
     }
 
-    if (this.claimed.has(issueId) || this.running.has(issueId)) {
+    const claimed = this.claimed.get(issueId);
+    if (claimed) {
+      const current = claimedEntryFromIssue(issue);
+      if (claimed.state === current.state && claimed.updatedAtMs === current.updatedAtMs) {
+        return false;
+      }
+
+      this.claimed.delete(issueId);
+    }
+
+    if (this.running.has(issueId)) {
       return false;
     }
 
@@ -488,7 +504,7 @@ export class Orchestrator {
     };
 
     this.running.set(issueId, runningEntry);
-    this.claimed.add(issueId);
+    this.claimed.set(issueId, claimedEntryFromIssue(currentIssue));
 
     const retry = this.retryAttempts.get(issueId);
     if (retry) {
@@ -534,7 +550,7 @@ export class Orchestrator {
         return;
       }
 
-      this.onWorkerExit(issueId, `error:${String(error)}`);
+      this.onWorkerExit(issueId, formatWorkerExitReason(error));
     }
   }
 
@@ -550,16 +566,26 @@ export class Orchestrator {
     if (reason === "normal") {
       this.completed.add(issueId);
 
-      this.scheduleIssueRetry(issueId, 1, {
-        identifier: runningEntry.identifier,
-        delayType: "continuation",
-      });
+      if (this.shouldScheduleContinuation(runningEntry.issue.state)) {
+        this.scheduleIssueRetry(issueId, 1, {
+          identifier: runningEntry.identifier,
+          delayType: "continuation",
+        });
 
-      this.logInfo("Agent task completed; scheduling continuation retry", {
-        issue_id: issueId,
-        issue_identifier: runningEntry.identifier,
-        session_id: runningEntry.sessionId,
-      });
+        this.logInfo("Agent task completed; scheduling continuation retry", {
+          issue_id: issueId,
+          issue_identifier: runningEntry.identifier,
+          state: runningEntry.issue.state,
+          session_id: runningEntry.sessionId,
+        });
+      } else {
+        this.logInfo("Agent task completed; waiting for issue state/update change before redispatch", {
+          issue_id: issueId,
+          issue_identifier: runningEntry.identifier,
+          state: runningEntry.issue.state,
+          session_id: runningEntry.sessionId,
+        });
+      }
 
       this.notifyUpdate();
       return;
@@ -819,6 +845,7 @@ query SymphonyLinearConnectionStatus {
         team_key: config.tracker.teamKey,
         team_id: config.tracker.teamId,
         assignee: config.tracker.assignee,
+        required_labels: config.tracker.requiredLabels,
         viewer_id: viewerId,
       });
     } catch (error) {
@@ -829,6 +856,7 @@ query SymphonyLinearConnectionStatus {
         team_key: config.tracker.teamKey,
         team_id: config.tracker.teamId,
         assignee: config.tracker.assignee,
+        required_labels: config.tracker.requiredLabels,
         has_api_key: Boolean(config.tracker.apiKey),
         reason: String(error),
       });
@@ -870,9 +898,31 @@ query SymphonyLinearConnectionStatus {
 
   private isActiveState(stateName: string | null): boolean {
     const normalized = normalizeIssueState(stateName ?? "");
-    return this.requireConfig().tracker.activeStates
-      .map((state) => normalizeIssueState(state))
-      .includes(normalized);
+    const activeStates = this.requireConfig().tracker.activeStates.map((state) =>
+      normalizeIssueState(state),
+    );
+
+    if (activeStates.includes("*")) {
+      return !this.isTerminalState(stateName);
+    }
+
+    return activeStates.includes(normalized);
+  }
+
+  private shouldScheduleContinuation(stateName: string | null): boolean {
+    const configuredStates = this.requireConfig().agent.continuationStates ?? [];
+    if (configuredStates.length === 0) {
+      return true;
+    }
+
+    const normalizedState = normalizeIssueState(stateName ?? "");
+    const allowed = new Set(configuredStates.map((state) => normalizeIssueState(state)));
+
+    if (allowed.has("*")) {
+      return !this.isTerminalState(stateName);
+    }
+
+    return allowed.has(normalizedState);
   }
 
   private recordSessionCompletionTotals(runningEntry: RunningEntry): void {
@@ -936,8 +986,12 @@ const isCandidateIssue = (issue: Issue, config: EffectiveConfig): boolean => {
   const terminalStates = new Set(
     config.tracker.terminalStates.map((state) => normalizeIssueState(state)),
   );
+  const labelPass = hasRequiredLabels(issue.labels, config.tracker.requiredLabels);
+  const statePass = activeStates.has("*")
+    ? !terminalStates.has(normalizedState)
+    : activeStates.has(normalizedState) && !terminalStates.has(normalizedState);
 
-  return activeStates.has(normalizedState) && !terminalStates.has(normalizedState);
+  return statePass && labelPass;
 };
 
 const isTodoBlockedByNonTerminal = (issue: Issue, config: EffectiveConfig): boolean => {
@@ -979,6 +1033,17 @@ const sortIssuesForDispatch = (issues: Issue[]): Issue[] => {
 
     return idA.localeCompare(idB);
   });
+};
+
+const hasRequiredLabels = (issueLabels: string[], requiredLabels: string[]): boolean => {
+  if (requiredLabels.length === 0) {
+    return true;
+  }
+
+  const normalizedIssueLabels = new Set(issueLabels.map((label) => label.trim().toLowerCase()));
+  return requiredLabels.every((requiredLabel) =>
+    normalizedIssueLabels.has(requiredLabel.trim().toLowerCase()),
+  );
 };
 
 const isPriority = (priority: number | null): priority is number => {
@@ -1097,6 +1162,49 @@ const asRecord = (value: unknown): Record<string, unknown> => {
 
 const maybeString = (value: unknown): string | null => {
   return typeof value === "string" && value.length > 0 ? value : null;
+};
+
+const claimedEntryFromIssue = (issue: Issue): ClaimedEntry => ({
+  state: normalizeIssueState(issue.state ?? ""),
+  updatedAtMs: issue.updatedAt ? issue.updatedAt.getTime() : null,
+});
+
+const formatWorkerExitReason = (error: unknown): string => {
+  if (error instanceof SymphonyError) {
+    const detail = formatSymphonyErrorDetail(error.details);
+    const base = `error:SymphonyError:${error.code}:${error.message}`;
+    return detail ? truncateReason(`${base}; detail=${detail}`) : truncateReason(base);
+  }
+
+  if (error instanceof Error) {
+    return truncateReason(`error:${error.name}:${error.message}`);
+  }
+
+  return truncateReason(`error:${String(error)}`);
+};
+
+const formatSymphonyErrorDetail = (details: unknown): string | null => {
+  const record = asRecord(details);
+  const output = maybeString(record.output);
+  if (output) {
+    return output.replace(/\s+/g, " ").trim();
+  }
+
+  const detailFields = [
+    maybeString(record.repository_id) ? `repository_id=${maybeString(record.repository_id)}` : null,
+    maybeString(record.remote) ? `remote=${maybeString(record.remote)}` : null,
+    maybeString(record.target) ? `target=${maybeString(record.target)}` : null,
+  ].filter((value): value is string => value !== null);
+
+  return detailFields.length > 0 ? detailFields.join(" ") : null;
+};
+
+const truncateReason = (value: string, maxLength = 512): string => {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, maxLength - 3)}...`;
 };
 
 export const orchestratorTestUtils = {

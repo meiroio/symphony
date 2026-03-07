@@ -51,6 +51,7 @@ export interface TrackerConfig {
   teamKey: string | null;
   teamId: string | null;
   assignee: string | null;
+  requiredLabels: string[];
   activeStates: string[];
   terminalStates: string[];
 }
@@ -68,6 +69,7 @@ export interface AgentConfig {
   maxTurns: number;
   maxRetryBackoffMs: number;
   maxConcurrentAgentsByState: Record<string, number>;
+  continuationStates: string[];
 }
 
 export interface CodexConfig {
@@ -90,6 +92,7 @@ export interface EffectiveConfig {
   polling: PollingConfig;
   workspace: WorkspaceConfig;
   repositories?: RepositoryConfig[];
+  promptVariables?: Record<string, unknown>;
   workflowId?: string;
   workflowPath?: string | null;
   hooks: HookConfig;

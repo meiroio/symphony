@@ -98,7 +98,12 @@ Workflow file:
 - Use `./workflows/WORKFLOW.linear.local.md` (git-ignored).
 - Do not commit tokens; keep secrets local.
 - Configure `repositories` so each issue workspace clones the correct repo(s) automatically.
+- Make sure `repositories[].remote` points to the correct repository for that workflow.
 - For team-wide review automation, start from `./WORKFLOW.linear.team-review.sample.md` and use `tracker.team_key` (for example `PIP`) instead of `project_slug`.
+- For phased software-factory automation (Define -> In Progress -> Code Review -> Design Review -> Testing -> Done), start from `./WORKFLOW.linear.software-factory.sample.md`.
+- For the TimeTracking factory specifically, start from `./WORKFLOW.linear.timetracking.factory.sample.md`.
+- Label-based routing is supported via `tracker.required_labels`; combine it with `active_states: ["*"]` for label-first workflows.
+- Current team-review local flow uses wildcard routing and applies label `crok` on approved reviews; human manually decides QA routing.
 
 ```bash
 cd /Users/vorcigernix/Dev/symphony/bun
@@ -111,6 +116,10 @@ Notes:
   warnings during smoke; this is expected.
 - If `workflows/WORKFLOW.linear.local.md` uses `api_key: "$LINEAR_API_KEY"`, export your
   token in the same shell before starting the service.
+- `repositories[].checkout` supports env references (for example `"$SYMPHONY_DEFAULT_BRANCH"`).
+- If a repository checkout branch is omitted or env resolution is missing, Symphony falls back to `SYMPHONY_DEFAULT_BRANCH` (or `main` when unset).
+- `prompt.variables` values are exposed to templates under `vars.*` (example: `{{ vars.testing_command }}`).
+- `agent.continuation_states` controls which states auto-retry immediately after a successful run.
 - For full MVP verification details, use
   [`docs/mvp-manual-test.md`](./docs/mvp-manual-test.md).
 - `repositories` entries are cloned on workspace creation, so the agent works in a deterministic repo layout.

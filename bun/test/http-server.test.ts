@@ -209,6 +209,7 @@ const startServer = (snapshot: RuntimeSnapshot): { baseUrl: string } => {
       teamKey: null,
       teamId: null,
       assignee: null,
+      requiredLabels: [],
       activeStates: ["Todo"],
       terminalStates: ["Done"],
     },
@@ -226,6 +227,7 @@ const startServer = (snapshot: RuntimeSnapshot): { baseUrl: string } => {
       maxTurns: 1,
       maxRetryBackoffMs: 1000,
       maxConcurrentAgentsByState: {},
+      continuationStates: [],
     },
     codex: {
       command: "codex app-server",

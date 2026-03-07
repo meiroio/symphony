@@ -69,18 +69,29 @@ export class AgentRunner {
         });
 
         const repositories = this.configProvider().repositories ?? [];
+        const promptVariables = this.configProvider().promptVariables;
+        const promptContext =
+          promptVariables && Object.keys(promptVariables).length > 0
+            ? {
+                workspace: {
+                  path: workspace,
+                },
+                variables: promptVariables,
+                repositories,
+              }
+            : {
+                workspace: {
+                  path: workspace,
+                },
+                repositories,
+              };
         const prompt =
           turnNumber === 1
             ? `${await buildPrompt(
                 this.configProvider().promptTemplate,
                 currentIssue,
                 options.attempt,
-                {
-                  workspace: {
-                    path: workspace,
-                  },
-                  repositories,
-                },
+                promptContext,
               )}\n\n${repositoryPromptContext(workspace, repositories)}`
             : continuationPrompt(turnNumber, maxTurns);
 
@@ -159,6 +170,13 @@ export class AgentRunner {
     const activeStates = this.configProvider().tracker.activeStates.map((state) =>
       normalizeIssueState(state),
     );
+    const terminalStates = this.configProvider().tracker.terminalStates.map((state) =>
+      normalizeIssueState(state),
+    );
+
+    if (activeStates.includes("*")) {
+      return !terminalStates.includes(normalizedState);
+    }
 
     return activeStates.includes(normalizedState);
   }

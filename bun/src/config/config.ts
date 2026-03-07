@@ -66,11 +66,16 @@ export const resolveConfig = (
   const agent = asRecord(config.agent);
   const codex = asRecord(config.codex);
   const server = asRecord(config.server);
+  const prompt = asRecord(config.prompt);
   const workflowMeta = asRecord(config.workflow);
   const repositories = normalizeRepositories(config.repositories, env);
+  const promptVariables = normalizePromptVariables(prompt.variables);
 
   const activeStates = parseCsvStringOrArray(tracker.active_states) ?? DEFAULT_ACTIVE_STATES;
   const terminalStates = parseCsvStringOrArray(tracker.terminal_states) ?? DEFAULT_TERMINAL_STATES;
+  const requiredLabels = (parseCsvStringOrArray(tracker.required_labels) ?? []).map((label) =>
+    label.trim().toLowerCase(),
+  );
 
   const maxConcurrentByState: Record<string, number> = {};
   const rawByState = asRecord(agent.max_concurrent_agents_by_state);
@@ -117,6 +122,7 @@ export const resolveConfig = (
       teamKey: normalizeSecret(resolveEnvBackedSecret(tracker.team_key, env, null)),
       teamId: normalizeSecret(resolveEnvBackedSecret(tracker.team_id, env, null)),
       assignee: normalizeSecret(resolveEnvBackedSecret(tracker.assignee, env, env.LINEAR_ASSIGNEE ?? null)),
+      requiredLabels,
       activeStates,
       terminalStates,
     },
@@ -127,6 +133,7 @@ export const resolveConfig = (
       root: resolvedWorkspaceRoot,
     },
     repositories,
+    promptVariables,
     workflowId,
     workflowPath: resolvedWorkflowPath,
     hooks: {
@@ -143,6 +150,7 @@ export const resolveConfig = (
       maxRetryBackoffMs:
         parsePositiveInteger(agent.max_retry_backoff_ms) ?? DEFAULT_MAX_RETRY_BACKOFF_MS,
       maxConcurrentAgentsByState: maxConcurrentByState,
+      continuationStates: parseCsvStringOrArray(agent.continuation_states) ?? [],
     },
     codex: {
       command: normalizeNonEmptyString(codex.command) ?? DEFAULT_CODEX_COMMAND,
@@ -425,6 +433,7 @@ const normalizeRepositories = (
   }
 
   const parsed: RepositoryConfig[] = [];
+  const defaultCheckout = normalizeNonEmptyString(env.SYMPHONY_DEFAULT_BRANCH) ?? "main";
 
   for (let index = 0; index < value.length; index += 1) {
     const raw = asRecord(value[index]);
@@ -436,7 +445,7 @@ const normalizeRepositories = (
 
     const rawId = normalizeNonEmptyString(raw.id);
     const id = rawId ?? `repo_${index + 1}`;
-    const checkout = normalizeNonEmptyString(raw.checkout) ?? "main";
+    const checkout = resolveEnvBackedSecret(raw.checkout, env, defaultCheckout) ?? defaultCheckout;
     const target = normalizeRepositoryTarget(resolveEnvBackedSecret(raw.target, env, ".") ?? ".");
     const primary = raw.primary === true;
 
@@ -474,4 +483,12 @@ const normalizeRepositoryTarget = (value: unknown): string => {
   }
 
   return trimmed;
+};
+
+const normalizePromptVariables = (value: unknown): Record<string, unknown> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return value as Record<string, unknown>;
 };

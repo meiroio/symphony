@@ -6,7 +6,7 @@ tracker:
   team_key: "PIP"
   api_key: "$LINEAR_API_KEY"
   active_states:
-    - In Review
+    - "*"
   terminal_states:
     - Done
     - Closed
@@ -20,12 +20,12 @@ workspace:
 repositories:
   - id: app
     remote: "<your-repository-ssh-or-https-url>"
-    checkout: main
+    checkout: "$SYMPHONY_DEFAULT_BRANCH"
     target: .
     primary: true
 agent:
-  max_concurrent_agents: 1
-  max_turns: 8
+  max_concurrent_agents: 10
+  max_turns: 5
 codex:
   read_timeout_ms: 5000
   stall_timeout_ms: 600000
@@ -54,12 +54,12 @@ Description:
 {% endif %}
 
 Review mission:
-1. Perform code review for issues in `In Review`.
+1. Perform code review for all candidate team issues (wildcard state routing).
 2. Do not implement feature changes unless required to demonstrate a critical fix.
 3. Produce clear, actionable findings with severity and evidence.
 
 Required workflow:
-1. Confirm issue is still in `In Review`; if not, stop.
+1. Confirm the issue is still active; if not, stop.
 2. Sync repository from remote (`fetch`/`pull`) and inspect relevant branch/diff.
 3. Check for correctness risks, regressions, missing tests, and operational impact.
 4. Run targeted validation commands when feasible.
@@ -68,10 +68,14 @@ Required workflow:
    - Findings (if any) with file/line references
    - Validation commands and outcomes
    - Risks and follow-ups
-6. If `CHANGES_REQUESTED`, attempt to move issue to `Rework` using `linear_graphql`.
+6. If verdict is `APPROVED`, add label `crok` to the issue via `linear_graphql`.
+7. Do not move the issue to QA automatically. Human will review your comment and route it manually.
 
 Comment mutation example:
 - `mutation CommentCreate($issueId: String!, $body: String!) { commentCreate(input: { issueId: $issueId, body: $body }) { success comment { id } } }`
 
-State transition example:
-- `mutation MoveIssue($id: String!, $stateId: String!) { issueUpdate(id: $id, input: { stateId: $stateId }) { success issue { id identifier state { name } } } }`
+Label mutation:
+- Attempt to add label `crok` to approved issues (using Linear GraphQL issue update flow).
+
+State transition:
+- Do not perform automatic state transitions in this flow.

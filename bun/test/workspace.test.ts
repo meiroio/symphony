@@ -15,6 +15,7 @@ const buildConfig = (workspaceRoot: string, hooks: Partial<EffectiveConfig["hook
     teamKey: null,
     teamId: null,
     assignee: null,
+    requiredLabels: [],
     activeStates: ["Todo"],
     terminalStates: ["Done"],
   },
@@ -33,6 +34,7 @@ const buildConfig = (workspaceRoot: string, hooks: Partial<EffectiveConfig["hook
     maxTurns: 1,
     maxRetryBackoffMs: 30_000,
     maxConcurrentAgentsByState: {},
+    continuationStates: [],
   },
   codex: {
     command: "codex app-server",

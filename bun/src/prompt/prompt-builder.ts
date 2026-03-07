@@ -30,6 +30,7 @@ export const buildPrompt = async (
       issue: toTemplateValue(issue),
       attempt,
       workspace: toTemplateValue({ path: context?.workspace?.path ?? "" }),
+      vars: toTemplateValue(context?.variables ?? {}),
       repositories: toTemplateValue(
         (context?.repositories ?? []).map((repository) => ({
           ...repository,
@@ -75,5 +76,6 @@ export interface PromptBuildContext {
   workspace?: {
     path: string;
   };
+  variables?: Record<string, unknown>;
   repositories?: RepositoryConfig[];
 }
