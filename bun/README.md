@@ -41,7 +41,16 @@ Notes:
 - One Symphony service is started per workflow file.
 - Each workflow should use a distinct `server.port` to avoid HTTP port conflicts.
 - `--port` override is only valid when running a single workflow.
+- When running multiple workflows, Symphony also starts an aggregate dashboard on `127.0.0.1:8788` by default.
+- Override aggregate dashboard port with `--dashboard-port <port>` (multi-workflow mode only) or `SYMPHONY_DASHBOARD_PORT`.
 - Optional: set `workflow.id` in workflow front matter for a stable identity in logs and API payloads.
+
+Example with explicit aggregate dashboard port:
+
+```bash
+cd bun
+bun run src/cli.ts --dashboard-port 8788 ./workflows/WORKFLOW.linear.local.md ./workflows/WORKFLOW.linear.team-review.local.md
+```
 
 Run all workflows from the `workflows/` directory:
 
