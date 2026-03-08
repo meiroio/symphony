@@ -1,7 +1,12 @@
 import { tmpdir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 
-import type { EffectiveConfig, RepositoryConfig, WorkflowDefinition } from "../types";
+import type {
+  EffectiveConfig,
+  RepositoryConfig,
+  WorkflowDefinition,
+  WorkflowVisualizationConfig,
+} from "../types";
 import {
   normalizeIssueState,
   parseCsvStringOrArray,
@@ -110,6 +115,7 @@ export const resolveConfig = (
   const configuredWorkflowId = normalizeNonEmptyString(workflowMeta.id);
   const inferredWorkflowId = inferWorkflowIdFromPath(resolvedWorkflowPath);
   const workflowId = configuredWorkflowId ?? inferredWorkflowId ?? "workflow";
+  const workflowVisualization = normalizeWorkflowVisualization(workflowMeta.visualization);
 
   return {
     tracker: {
@@ -136,6 +142,7 @@ export const resolveConfig = (
     promptVariables,
     workflowId,
     workflowPath: resolvedWorkflowPath,
+    workflowVisualization,
     hooks: {
       afterCreate: normalizeHookScript(hooks.after_create),
       beforeRun: normalizeHookScript(hooks.before_run),
@@ -264,6 +271,86 @@ const normalizeNonEmptyString = (value: unknown): string | null => {
 
   const trimmed = asString.trim();
   return trimmed.length > 0 ? trimmed : null;
+};
+
+const normalizeWorkflowVisualization = (value: unknown): WorkflowVisualizationConfig | null => {
+  const raw = asRecord(value);
+  const stageInputs = Array.isArray(raw.stages) ? raw.stages : [];
+  const transitionInputs = Array.isArray(raw.transitions) ? raw.transitions : [];
+
+  const stages = stageInputs
+    .map((input) => normalizeWorkflowVisualizationStage(input))
+    .filter((stage): stage is WorkflowVisualizationConfig["stages"][number] => stage !== null);
+
+  if (stages.length === 0) {
+    return null;
+  }
+
+  const knownIds = new Set(stages.map((stage) => stage.id));
+  const transitions = transitionInputs
+    .map((input) => normalizeWorkflowVisualizationTransition(input))
+    .filter((transition): transition is WorkflowVisualizationConfig["transitions"][number] => {
+      return transition !== null && knownIds.has(transition.from) && knownIds.has(transition.to);
+    });
+
+  return { stages, transitions };
+};
+
+const normalizeWorkflowVisualizationStage = (
+  value: unknown,
+): WorkflowVisualizationConfig["stages"][number] | null => {
+  const raw = asRecord(value);
+  const label =
+    normalizeNonEmptyString(raw.label) ??
+    normalizeNonEmptyString(raw.state) ??
+    normalizeNonEmptyString(raw.id);
+
+  if (!label) {
+    return null;
+  }
+
+  const state = normalizeNonEmptyString(raw.state);
+  const idSource = normalizeNonEmptyString(raw.id) ?? state ?? label;
+
+  return {
+    id: slugifyWorkflowVisualizationId(idSource),
+    label,
+    state,
+    description: normalizeNonEmptyString(raw.description),
+  };
+};
+
+const normalizeWorkflowVisualizationTransition = (
+  value: unknown,
+): WorkflowVisualizationConfig["transitions"][number] | null => {
+  const raw = asRecord(value);
+  const from = normalizeNonEmptyString(raw.from);
+  const to = normalizeNonEmptyString(raw.to);
+
+  if (!from || !to) {
+    return null;
+  }
+
+  return {
+    from: slugifyWorkflowVisualizationId(from),
+    to: slugifyWorkflowVisualizationId(to),
+    label: normalizeNonEmptyString(raw.label),
+    tone: normalizeVisualizationTone(raw.tone),
+  };
+};
+
+const normalizeVisualizationTone = (value: unknown): "default" | "alert" => {
+  return normalizeNonEmptyString(value)?.toLowerCase() === "alert" ? "alert" : "default";
+};
+
+const slugifyWorkflowVisualizationId = (value: string): string => {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  return slug || "stage";
 };
 
 const normalizeSecret = (value: unknown): string | null => {

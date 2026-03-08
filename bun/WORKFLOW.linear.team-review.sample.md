@@ -6,7 +6,7 @@ tracker:
   team_key: "PIP"
   api_key: "$LINEAR_API_KEY"
   active_states:
-    - "*"
+    - In Review
   terminal_states:
     - Done
     - Closed
@@ -26,6 +26,8 @@ repositories:
 agent:
   max_concurrent_agents: 10
   max_turns: 5
+  continuation_states:
+    - "__disabled__"
 codex:
   read_timeout_ms: 5000
   stall_timeout_ms: 600000
@@ -54,12 +56,12 @@ Description:
 {% endif %}
 
 Review mission:
-1. Perform code review for all candidate team issues (wildcard state routing).
+1. Perform code review only for issues currently in `In Review`.
 2. Do not implement feature changes unless required to demonstrate a critical fix.
 3. Produce clear, actionable findings with severity and evidence.
 
 Required workflow:
-1. Confirm the issue is still active; if not, stop.
+1. Confirm the issue is still in `In Review`; if not, stop.
 2. Sync repository from remote (`fetch`/`pull`) and inspect relevant branch/diff.
 3. Check for correctness risks, regressions, missing tests, and operational impact.
 4. Run targeted validation commands when feasible.

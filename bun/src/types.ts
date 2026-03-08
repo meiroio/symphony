@@ -87,6 +87,25 @@ export interface ServerConfig {
   host: string;
 }
 
+export interface WorkflowVisualizationStage {
+  id: string;
+  label: string;
+  state: string | null;
+  description: string | null;
+}
+
+export interface WorkflowVisualizationTransition {
+  from: string;
+  to: string;
+  label: string | null;
+  tone: "default" | "alert";
+}
+
+export interface WorkflowVisualizationConfig {
+  stages: WorkflowVisualizationStage[];
+  transitions: WorkflowVisualizationTransition[];
+}
+
 export interface EffectiveConfig {
   tracker: TrackerConfig;
   polling: PollingConfig;
@@ -95,6 +114,7 @@ export interface EffectiveConfig {
   promptVariables?: Record<string, unknown>;
   workflowId?: string;
   workflowPath?: string | null;
+  workflowVisualization?: WorkflowVisualizationConfig | null;
   hooks: HookConfig;
   agent: AgentConfig;
   codex: CodexConfig;

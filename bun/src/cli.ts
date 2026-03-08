@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { SymphonyService } from "./service";
 import { defaultWorkflowPath } from "./config/workflow";
 import { MultiWorkflowDashboard } from "./http/multi-workflow-dashboard";
+import type { EffectiveConfig } from "./types";
 import { logger } from "./utils/logger";
 
 interface CliOptions {
@@ -38,6 +39,7 @@ export const main = async (rawArgs: string[] = Bun.argv.slice(2)): Promise<void>
             serviceSpecs.map((spec, index) => {
               const snapshot = spec.service.getOrchestrator().snapshot();
               const started = spec.started;
+              const config = spec.service.getConfig();
               const key = `${snapshot.workflowId ?? `workflow-${index}`}:${index}`;
 
               return {
@@ -45,6 +47,8 @@ export const main = async (rawArgs: string[] = Bun.argv.slice(2)): Promise<void>
                 workflowId: snapshot.workflowId ?? started?.workflowId ?? null,
                 workflowPath: snapshot.workflowPath ?? started?.workflowPath ?? spec.workflowPath,
                 httpPort: started?.httpPort ?? null,
+                tracker: trackerSummaryFromConfig(config),
+                visualization: config.workflowVisualization ?? null,
                 snapshot,
               };
             }),
@@ -111,6 +115,38 @@ export const main = async (rawArgs: string[] = Bun.argv.slice(2)): Promise<void>
       workflows: options.workflowPaths,
     });
   }
+};
+
+const trackerSummaryFromConfig = (config: EffectiveConfig) => {
+  if (config.tracker.projectSlug) {
+    return {
+      kind: config.tracker.kind,
+      scopeType: "project",
+      scopeLabel: config.tracker.projectSlug,
+    };
+  }
+
+  if (config.tracker.teamKey) {
+    return {
+      kind: config.tracker.kind,
+      scopeType: "team",
+      scopeLabel: config.tracker.teamKey,
+    };
+  }
+
+  if (config.tracker.teamId) {
+    return {
+      kind: config.tracker.kind,
+      scopeType: "team",
+      scopeLabel: config.tracker.teamId,
+    };
+  }
+
+  return {
+    kind: config.tracker.kind,
+    scopeType: "workspace",
+    scopeLabel: null,
+  };
 };
 
 export const parseArgs = (args: string[]): CliOptions => {

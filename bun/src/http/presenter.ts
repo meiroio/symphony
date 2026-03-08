@@ -15,6 +15,7 @@ export const statePayload = (snapshot: RuntimeSnapshot): Record<string, unknown>
       workflow_id: snapshot.workflowId ?? null,
       issue_id: entry.issueId,
       issue_identifier: entry.identifier,
+      issue_title: entry.issue.title,
       state: entry.state,
       session_id: entry.sessionId,
       turn_count: entry.turnCount,
@@ -36,6 +37,11 @@ export const statePayload = (snapshot: RuntimeSnapshot): Record<string, unknown>
       due_at: dueAtIso(entry.dueInMs),
       error: entry.error,
     })),
+    polling: {
+      checking: snapshot.polling.checking,
+      next_poll_in_ms: snapshot.polling.nextPollInMs,
+      poll_interval_ms: snapshot.polling.pollIntervalMs,
+    },
     codex_totals: {
       input_tokens: snapshot.codexTotals.inputTokens,
       output_tokens: snapshot.codexTotals.outputTokens,
@@ -81,6 +87,7 @@ export const issuePayload = (
         ? {
             session_id: running.sessionId,
             turn_count: running.turnCount,
+            issue_title: running.issue.title,
             state: running.state,
             started_at: iso(running.startedAt),
             last_event: running.lastCodexEvent,

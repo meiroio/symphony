@@ -184,8 +184,34 @@ describe("http server", () => {
 
     const html = await response.text();
     expect(html).toContain("Symphony Operations Dashboard");
+    expect(html).toContain("Agent orchestration for Linear workflows");
+    expect(html).toContain('href="/favicon.svg"');
+    expect(html).toContain('href="/apple-touch-icon.png"');
+    expect(html).toContain('href="/site.webmanifest"');
     expect(html).toContain("/api/v1/state");
     expect(html).toContain("/api/v1/refresh");
+  });
+
+  test("brand asset endpoints serve installable app icons", async () => {
+    const { baseUrl } = startServer(staticSnapshot());
+
+    const faviconResponse = await fetch(`${baseUrl}/favicon.svg`);
+    expect(faviconResponse.status).toBe(200);
+    expect(faviconResponse.headers.get("content-type")).toContain("image/svg+xml");
+    const svg = await faviconResponse.text();
+    expect(svg).toContain("<svg");
+    expect(svg).toContain("<rect");
+
+    const touchIconResponse = await fetch(`${baseUrl}/apple-touch-icon.png`);
+    expect(touchIconResponse.status).toBe(200);
+    expect(touchIconResponse.headers.get("content-type")).toContain("image/png");
+
+    const manifestResponse = await fetch(`${baseUrl}/site.webmanifest`);
+    expect(manifestResponse.status).toBe(200);
+    expect(manifestResponse.headers.get("content-type")).toContain("application/manifest+json");
+    const manifest = (await manifestResponse.json()) as Record<string, unknown>;
+    expect(manifest.name).toBe("Symphony");
+    expect(manifest.start_url).toBe("/");
   });
 });
 

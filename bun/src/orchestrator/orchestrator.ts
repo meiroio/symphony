@@ -543,18 +543,22 @@ export class Orchestrator {
         onMessage: (event) => this.handleCodexUpdate(issueId, event),
       });
 
-      this.onWorkerExit(issueId, "normal");
+      await this.onWorkerExit(issueId, issue.id, "normal");
     } catch (error) {
       if (signal.aborted) {
-        this.onWorkerExit(issueId, "cancelled");
+        await this.onWorkerExit(issueId, issue.id, "cancelled");
         return;
       }
 
-      this.onWorkerExit(issueId, formatWorkerExitReason(error));
+      await this.onWorkerExit(issueId, issue.id, formatWorkerExitReason(error));
     }
   }
 
-  private onWorkerExit(issueId: string, reason: "normal" | "cancelled" | string): void {
+  private async onWorkerExit(
+    issueId: string,
+    sourceIssueId: string,
+    reason: "normal" | "cancelled" | string,
+  ): Promise<void> {
     const runningEntry = this.running.get(issueId);
     if (!runningEntry) {
       return;
@@ -564,9 +568,12 @@ export class Orchestrator {
     this.recordSessionCompletionTotals(runningEntry);
 
     if (reason === "normal") {
+      const latestIssue = await this.refreshClaimedIssue(issueId, sourceIssueId);
+      const latestState = latestIssue?.state ?? runningEntry.issue.state;
+
       this.completed.add(issueId);
 
-      if (this.shouldScheduleContinuation(runningEntry.issue.state)) {
+      if (this.shouldScheduleContinuation(latestState)) {
         this.scheduleIssueRetry(issueId, 1, {
           identifier: runningEntry.identifier,
           delayType: "continuation",
@@ -575,14 +582,14 @@ export class Orchestrator {
         this.logInfo("Agent task completed; scheduling continuation retry", {
           issue_id: issueId,
           issue_identifier: runningEntry.identifier,
-          state: runningEntry.issue.state,
+          state: latestState,
           session_id: runningEntry.sessionId,
         });
       } else {
         this.logInfo("Agent task completed; waiting for issue state/update change before redispatch", {
           issue_id: issueId,
           issue_identifier: runningEntry.identifier,
-          state: runningEntry.issue.state,
+          state: latestState,
           session_id: runningEntry.sessionId,
         });
       }
@@ -614,6 +621,29 @@ export class Orchestrator {
     });
 
     this.notifyUpdate();
+  }
+
+  private async refreshClaimedIssue(issueId: string, sourceIssueId: string): Promise<Issue | null> {
+    try {
+      const tracker = this.createTracker();
+      const refreshed = await tracker.fetchIssueStatesByIds([sourceIssueId]);
+      const currentIssue = refreshed[0] ?? null;
+
+      if (currentIssue) {
+        this.claimed.set(issueId, claimedEntryFromIssue(currentIssue));
+        return currentIssue;
+      }
+
+      this.claimed.delete(issueId);
+      return null;
+    } catch (error) {
+      this.logWarn("Failed to refresh issue fingerprint after worker completion", {
+        issue_id: sourceIssueId,
+        issue_identifier: this.running.get(issueId)?.identifier ?? issueId,
+        reason: String(error),
+      });
+      return null;
+    }
   }
 
   private handleCodexUpdate(issueId: string, update: CodexEvent): void {

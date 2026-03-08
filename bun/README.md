@@ -29,6 +29,14 @@ bun run src/cli.ts /absolute/path/to/WORKFLOW.md --port 8787
 
 If no workflow path is passed, the CLI uses `./WORKFLOW.md` from the current working directory.
 
+Single-workflow shortcuts from `package.json`:
+
+```bash
+cd bun
+bun run dev
+bun run start
+```
+
 Run multiple workflows in one process:
 
 ```bash
@@ -57,6 +65,54 @@ Run all workflows from the `workflows/` directory:
 ```bash
 cd bun
 bun run workflows
+```
+
+`bun run workflows` is the directory-mode launcher:
+
+- It loads every `.md` workflow file from `./workflows`.
+- Files are discovered alphabetically.
+- Startup fails if the directory contains no workflow files.
+- This is the simplest way to run the whole local or production workflow set.
+- To use a different directory, run `bun run src/run-workflows.ts /absolute/path/to/workflows`.
+
+## Aggregate Dashboard
+
+The aggregate dashboard is available only when Symphony is running more than one workflow in the same process.
+
+Default URL:
+
+```bash
+http://127.0.0.1:8788
+```
+
+What it shows:
+
+- workflow list on the left
+- selected workflow detail on the right
+- running agents
+- retry queue
+- polling state
+- token totals
+- raw JSON inspector for debugging
+
+Operator controls:
+
+- click a workflow to inspect it
+- filter workflows by id or path
+- `j` / `k` or arrow keys to move selection
+- `r` to trigger refresh
+- toggle `Auto Sweep` to pause or resume auto-refresh
+
+Dashboard port configuration:
+
+- `bun run src/cli.ts <workflow...>`: use `--dashboard-port <port>` or `SYMPHONY_DASHBOARD_PORT`
+- `bun run workflows`: use `SYMPHONY_DASHBOARD_PORT`
+
+Example:
+
+```bash
+cd bun
+SYMPHONY_DASHBOARD_PORT=8799 bun run workflows
 ```
 
 ## Testing

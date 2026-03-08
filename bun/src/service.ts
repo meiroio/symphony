@@ -1,4 +1,4 @@
-import type { Issue } from "./types";
+import type { EffectiveConfig, Issue } from "./types";
 import { WorkflowStore } from "./config/workflow-store";
 import { resolveConfig, validateDispatchConfig } from "./config/config";
 import { Orchestrator } from "./orchestrator/orchestrator";
@@ -95,6 +95,10 @@ export class SymphonyService {
 
   getOrchestrator(): Orchestrator {
     return this.orchestrator;
+  }
+
+  getConfig(): EffectiveConfig {
+    return this.currentConfig();
   }
 
   private currentConfig() {

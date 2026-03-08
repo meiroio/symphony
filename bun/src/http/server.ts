@@ -2,6 +2,7 @@ import { Elysia } from "elysia";
 
 import type { EffectiveConfig } from "../types";
 import { Orchestrator } from "../orchestrator/orchestrator";
+import { isBrandAssetPath, registerBrandRoutes, renderBrandHead, renderBrandMark } from "./favicon";
 import { issuePayload, refreshPayload, statePayload } from "./presenter";
 
 interface HttpServerOptions {
@@ -43,6 +44,8 @@ const buildApp = (
   configProvider: () => EffectiveConfig,
 ): Elysia => {
   const app = new Elysia();
+
+  registerBrandRoutes(app);
 
   app.onRequest(({ request, set }) => {
     const path = new URL(request.url).pathname;
@@ -130,6 +133,10 @@ const isMethodNotAllowed = (path: string, method: string): boolean => {
     return method !== "GET";
   }
 
+  if (isBrandAssetPath(path)) {
+    return method !== "GET";
+  }
+
   if (path === "/api/v1/state") {
     return method !== "GET";
   }
@@ -151,7 +158,7 @@ const renderDashboardHtml = (): string => {
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Symphony Operations Dashboard</title>
+${renderBrandHead("Symphony Operations Dashboard")}
         <style>
           :root {
             color-scheme: light;
@@ -172,6 +179,42 @@ const renderDashboardHtml = (): string => {
             max-width: 980px;
             margin: 0 auto;
             padding: 24px 16px;
+          }
+          .brand-lockup {
+            display: inline-flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 18px;
+          }
+          .brand-emblem {
+            display: grid;
+            place-items: center;
+            width: 52px;
+            height: 52px;
+            border-radius: 16px;
+          }
+          .brand-mark {
+            width: 30px;
+            height: 30px;
+            display: block;
+          }
+          .brand-copy {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+          }
+          .brand-name {
+            margin: 0;
+            font-size: 0.84rem;
+            font-weight: 800;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: #0f172a;
+          }
+          .brand-note {
+            margin: 0;
+            color: var(--muted);
+            font-size: 0.9rem;
           }
           h1 {
             margin: 0 0 8px;
@@ -209,6 +252,13 @@ const renderDashboardHtml = (): string => {
       </head>
       <body>
         <main>
+          <div class="brand-lockup">
+            <div class="brand-emblem">${renderBrandMark("brand-mark")}</div>
+            <div class="brand-copy">
+              <p class="brand-name">Symphony</p>
+              <p class="brand-note">Agent orchestration for Linear workflows</p>
+            </div>
+          </div>
           <h1>Symphony Operations Dashboard</h1>
           <p class="muted">
             Read-only status surface. JSON APIs are available at
