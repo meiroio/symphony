@@ -335,7 +335,10 @@ ${renderBrandHead("Symphony Workboard")}
           overflow: hidden;
           position: relative;
           margin-bottom: 16px;
-          padding: clamp(16px, 2.4vw, 24px);
+          padding: clamp(20px, 3vw, 32px);
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
           background:
             radial-gradient(circle at 88% 18%, rgba(137, 184, 255, 0.18), transparent 18rem),
             linear-gradient(135deg, rgba(18, 28, 40, 0.98), rgba(16, 37, 35, 0.94));
@@ -353,20 +356,18 @@ ${renderBrandHead("Symphony Workboard")}
         }
         .hero-head {
           display: flex;
-          align-items: flex-start;
+          align-items: center;
           justify-content: space-between;
-          gap: 14px;
-          margin-bottom: 14px;
+          gap: 16px;
         }
         .hero-copy {
-          flex: 1 1 auto;
-          max-width: 920px;
+          display: none;
         }
         .brand-lockup {
           display: inline-flex;
           align-items: center;
           gap: 12px;
-          margin-bottom: 12px;
+          flex: 1 1 auto;
         }
         .brand-emblem {
           display: grid;
@@ -402,57 +403,18 @@ ${renderBrandHead("Symphony Workboard")}
           letter-spacing: 0.06em;
           text-transform: uppercase;
         }
-        .selected-workflow-bar {
-          display: grid;
-          grid-template-columns: auto minmax(0, 1fr) minmax(260px, 1fr);
-          align-items: center;
-          gap: 12px;
-          padding: 10px 14px;
-          border: 1px solid rgba(42, 57, 75, 0.92);
-          border-radius: 18px;
-          background: rgba(13, 21, 31, 0.62);
-          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
-        }
-        .selected-workflow-kicker {
-          margin: 0;
-          color: var(--accent);
-          text-transform: uppercase;
-          letter-spacing: 0.18em;
-          font-size: 0.7rem;
-          font-weight: 700;
-          white-space: nowrap;
-        }
-        .selected-workflow-title {
-          margin: 0;
-          font-family: "Fraunces", Georgia, serif;
-          font-size: 1.02rem;
-          line-height: 1.08;
-          letter-spacing: -0.02em;
-          overflow-wrap: anywhere;
-        }
-        .selected-workflow-meta {
+        .sub {
           margin: 0;
           color: var(--muted);
           font-size: 0.84rem;
-          line-height: 1.45;
-          min-height: 2.9em;
-          display: flex;
-          align-items: center;
-          overflow-wrap: anywhere;
-        }
-        .sub {
-          margin: 10px 0 0;
-          color: var(--muted);
-          font-size: 0.9rem;
-          line-height: 1.52;
-          max-width: 72ch;
+          line-height: 1.5;
+          max-width: 80ch;
         }
         .hero-actions {
           display: flex;
           gap: 10px;
           align-items: center;
-          flex-wrap: wrap;
-          justify-content: flex-end;
+          flex-shrink: 0;
         }
         .toolbar-button {
           appearance: none;
@@ -483,14 +445,13 @@ ${renderBrandHead("Symphony Workboard")}
           gap: 12px;
         }
         .stat-tile {
-          min-height: 128px;
-          padding: 18px;
+          padding: 14px 16px;
           display: flex;
           flex-direction: column;
-          justify-content: space-between;
+          gap: 4px;
           background: rgba(20, 30, 43, 0.78);
           border: 1px solid rgba(42, 57, 75, 0.92);
-          border-radius: 22px;
+          border-radius: 16px;
         }
         .stat-kicker {
           display: block;
@@ -502,14 +463,13 @@ ${renderBrandHead("Symphony Workboard")}
         }
         .stat-value {
           font-family: "Fraunces", Georgia, serif;
-          font-size: clamp(1.9rem, 3vw, 2.5rem);
+          font-size: clamp(1.5rem, 2.2vw, 1.85rem);
           line-height: 1;
-          margin-top: 10px;
         }
         .stat-note {
-          margin-top: 12px;
+          margin-top: 2px;
           color: var(--muted);
-          font-size: 0.8rem;
+          font-size: 0.78rem;
           line-height: 1.45;
           display: -webkit-box;
           -webkit-box-orient: vertical;
@@ -1437,14 +1397,13 @@ ${renderBrandHead("Symphony Workboard")}
           .running-facts {
             grid-template-columns: 1fr;
           }
-          .hero-head,
+          .hero-head {
+            flex-direction: column;
+            align-items: flex-start;
+          }
           .stage-head,
           .detail-hero-top {
             flex-direction: column;
-          }
-          .selected-workflow-bar {
-            grid-template-columns: 1fr;
-            gap: 6px;
           }
           .section-note {
             text-align: left;
@@ -1456,23 +1415,12 @@ ${renderBrandHead("Symphony Workboard")}
       <main class="shell">
         <section class="hero panel">
           <div class="hero-head">
-            <div class="hero-copy">
-              <div class="brand-lockup">
-                <div class="brand-emblem">${renderBrandMark("brand-mark")}</div>
-                <div class="brand-copy">
-                  <p class="brand-name">Symphony Workflow Studio</p>
-                  <p class="brand-note">Operator board for autonomous Linear workflows</p>
-                </div>
+            <div class="brand-lockup">
+              <div class="brand-emblem">${renderBrandMark("brand-mark")}</div>
+              <div class="brand-copy">
+                <p class="brand-name">Symphony Workflow Studio</p>
+                <p class="brand-note">Operator board for autonomous Linear workflows</p>
               </div>
-              <div class="selected-workflow-bar">
-                <p class="selected-workflow-kicker">Current workflow</p>
-                <p class="selected-workflow-title" id="selected-title">Select workflow</p>
-                <p class="selected-workflow-meta" id="selected-meta">Loading workflow details...</p>
-              </div>
-              <p class="sub">
-                Quiet workflows stay understated, pressure points stand out immediately, and each
-                workflow opens into a focused activity view with agents, retries, and health signals.
-              </p>
             </div>
             <div class="hero-actions">
               <button class="toolbar-button" id="refresh-all" type="button">Refresh now</button>
@@ -1480,6 +1428,10 @@ ${renderBrandHead("Symphony Workboard")}
             </div>
           </div>
           <div class="overview-strip" id="overview-strip"></div>
+          <p class="sub">
+            Quiet workflows stay understated, pressure points stand out immediately, and each
+            workflow opens into a focused activity view with agents, retries, and health signals.
+          </p>
         </section>
           <section class="layout">
           <aside class="panel rail">
@@ -1659,21 +1611,17 @@ ${renderBrandHead("Symphony Workboard")}
         }
 
         function renderDetail(payload) {
-          const titleEl = document.getElementById('selected-title');
-          const metaEl = document.getElementById('selected-meta');
           const detailEl = document.getElementById('workflow-detail');
-          if (!titleEl || !metaEl || !detailEl) return;
+          if (!detailEl) return;
 
           if (payload && payload.error) {
-            titleEl.textContent = 'Workflow Detail';
-            metaEl.textContent = 'Selected workflow is unavailable.';
             detailEl.innerHTML = '<div class="empty-state">' + escapeHtml(payload.error.message || 'Unknown error') + '</div>';
             return;
           }
 
           const chosen = latestList.find((entry) => entry.key === selectedKey);
-          titleEl.textContent = chosen ? workflowTitle(chosen) : 'Workflow Detail';
-          metaEl.textContent = trackerSummary(payload.tracker || (chosen ? chosen.tracker : null));
+          const title = chosen ? workflowTitle(chosen) : 'Workflow Detail';
+          const trackerText = trackerSummary(payload.tracker || (chosen ? chosen.tracker : null));
 
           const running = Array.isArray(payload.running) ? payload.running : [];
           const retrying = Array.isArray(payload.retrying) ? payload.retrying : [];
@@ -1682,7 +1630,6 @@ ${renderBrandHead("Symphony Workboard")}
           const nextPoll = payload.polling ? formatMilliseconds(payload.polling.next_poll_in_ms) : 'n/a';
           const soloUrl = typeof payload.http_port === 'number' ? 'http://127.0.0.1:' + payload.http_port + '/' : null;
           const alertSummary = attentionSummary(attention);
-          const trackerText = trackerSummary(payload.tracker || (chosen ? chosen.tracker : null));
           const trackerBadge = trackerBadgeLabel(payload.tracker || (chosen ? chosen.tracker : null));
           const visualization = payload.visualization || null;
           const stageSummary = summarizeWorkflowStages(running, retrying, visualization);
@@ -1690,9 +1637,9 @@ ${renderBrandHead("Symphony Workboard")}
 
           detailEl.innerHTML =
             '<section class="detail-hero">' +
-              '<div class="detail-hero-top">' +
-                '<div>' +
-                  '<h3 class="detail-name">' + escapeHtml(titleEl.textContent) + '</h3>' +
+                '<div class="detail-hero-top">' +
+                  '<div>' +
+                  '<h3 class="detail-name">' + escapeHtml(title) + '</h3>' +
                   '<p class="detail-path">' + escapeHtml((payload.workflow && payload.workflow.path) || '') + '</p>' +
                 '</div>' +
                 '<div class="detail-links">' +
