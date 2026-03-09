@@ -51,6 +51,8 @@ export interface TrackerConfig {
   teamKey: string | null;
   teamId: string | null;
   assignee: string | null;
+  webhookPath: string | null;
+  webhookSecret: string | null;
   requiredLabels: string[];
   activeStates: string[];
   terminalStates: string[];

@@ -5,6 +5,8 @@ tracker:
   kind: linear
   team_key: "<your-linear-team-key>"
   api_key: "$LINEAR_API_KEY"
+  webhook_path: "/api/v1/webhooks/linear"
+  webhook_secret: "$LINEAR_WEBHOOK_SECRET"
   active_states:
     - Define
     - In Progress
@@ -18,7 +20,7 @@ tracker:
     - Canceled
     - Duplicate
 polling:
-  interval_ms: 5000
+  interval_ms: 0
 workspace:
   root: /tmp/symphony-bun-workspaces
 repositories:
@@ -39,11 +41,12 @@ codex:
   read_timeout_ms: 5000
   stall_timeout_ms: 600000
   turn_timeout_ms: 1800000
-  command: codex app-server
+  command: codex --config shell_environment_policy.inherit=all app-server
   approval_policy: never
   thread_sandbox: workspace-write
   turn_sandbox_policy:
     type: workspaceWrite
+    networkAccess: true
 server:
   host: 127.0.0.1
   port: 8792

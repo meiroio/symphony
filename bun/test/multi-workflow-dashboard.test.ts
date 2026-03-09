@@ -69,6 +69,7 @@ describe("multi workflow dashboard", () => {
           workflowId: "linear-team-review",
           workflowPath: "/tmp/workflows/review.md",
           httpPort: 8791,
+          webhookPath: "/api/v1/webhooks/linear",
           tracker: {
             kind: "linear",
             scopeType: "team",
@@ -81,6 +82,7 @@ describe("multi workflow dashboard", () => {
           workflowId: "linear-timetracking-factory",
           workflowPath: "/tmp/workflows/factory.md",
           httpPort: 8792,
+          webhookPath: "/api/v1/webhooks/linear",
           tracker: {
             kind: "linear",
             scopeType: "project",
@@ -89,6 +91,13 @@ describe("multi workflow dashboard", () => {
           snapshot: secondSnapshot,
         },
       ],
+      refreshByKey: () => ({
+        key: "review",
+        workflowId: "linear-team-review",
+        workflowPath: "/tmp/workflows/review.md",
+        coalesced: false,
+        requestedAt: new Date("2026-03-07T18:00:00.000Z"),
+      }),
       refreshAll: () => [
         {
           key: "review",

@@ -1,0 +1,12 @@
+version: "3.9"
+
+services:
+  symphony:
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 512
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=512m

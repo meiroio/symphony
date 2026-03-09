@@ -283,7 +283,12 @@ export class Orchestrator {
     } finally {
       const intervalMs = this.requireConfig().polling.intervalMs;
       this.pollCheckInProgress = false;
-      this.scheduleTick(intervalMs);
+      if (intervalMs > 0) {
+        this.scheduleTick(intervalMs);
+      } else {
+        this.nextPollDueAtMs = null;
+        this.tickTimer = null;
+      }
       this.notifyUpdate();
     }
   }
@@ -308,6 +313,12 @@ export class Orchestrator {
       });
       return;
     }
+
+    const refreshedIds = new Set(
+      refreshed
+        .map((issue) => issue.id)
+        .filter((issueId): issueId is string => typeof issueId === "string" && issueId.length > 0),
+    );
 
     for (const issue of refreshed) {
       const issueId = issue.id;
@@ -348,6 +359,19 @@ export class Orchestrator {
       if (runningEntry) {
         runningEntry.issue = issue;
       }
+    }
+
+    for (const issueId of issueIds) {
+      if (refreshedIds.has(issueId)) {
+        continue;
+      }
+
+      const runningEntry = this.running.get(issueId);
+      this.logInfo("Issue missing from tracker; stopping run", {
+        issue_id: issueId,
+        issue_identifier: runningEntry?.identifier ?? issueId,
+      });
+      this.terminateRunningIssue(issueId, false);
     }
   }
 

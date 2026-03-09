@@ -1,6 +1,7 @@
 import { Elysia } from "elysia";
 
 import type { RuntimeSnapshot, WorkflowVisualizationConfig } from "../types";
+import { logger } from "../utils/logger";
 import { isBrandAssetPath, registerBrandRoutes, renderBrandHead, renderBrandMark } from "./favicon";
 import { statePayload } from "./presenter";
 
@@ -9,6 +10,7 @@ export interface MultiWorkflowEntry {
   workflowId: string | null;
   workflowPath: string | null;
   httpPort: number | null;
+  webhookPath: string | null;
   tracker?: {
     kind: string | null;
     scopeType: string;
@@ -30,20 +32,29 @@ interface MultiWorkflowDashboardOptions {
     coalesced: boolean;
     requestedAt: Date;
   }>;
+  refreshByKey: (key: string) => {
+    key: string;
+    workflowId: string | null;
+    workflowPath: string | null;
+    coalesced: boolean;
+    requestedAt: Date;
+  } | null;
 }
 
 export class MultiWorkflowDashboard {
   private readonly entriesProvider: () => MultiWorkflowEntry[];
   private readonly refreshAll: MultiWorkflowDashboardOptions["refreshAll"];
+  private readonly refreshByKey: MultiWorkflowDashboardOptions["refreshByKey"];
   private server: Bun.Server<unknown> | null = null;
 
   constructor(options: MultiWorkflowDashboardOptions) {
     this.entriesProvider = options.entriesProvider;
     this.refreshAll = options.refreshAll;
+    this.refreshByKey = options.refreshByKey;
   }
 
   start(port: number, host: string): number {
-    const app = buildApp(this.entriesProvider, this.refreshAll);
+    const app = buildApp(this.entriesProvider, this.refreshAll, this.refreshByKey);
 
     const startedApp = app.listen({
       port,
@@ -64,6 +75,7 @@ export class MultiWorkflowDashboard {
 const buildApp = (
   entriesProvider: () => MultiWorkflowEntry[],
   refreshAll: MultiWorkflowDashboardOptions["refreshAll"],
+  refreshByKey: MultiWorkflowDashboardOptions["refreshByKey"],
 ): Elysia => {
   const app = new Elysia();
 
@@ -81,6 +93,17 @@ const buildApp = (
     return;
   });
 
+  app.onError(({ error, request, set, code }) => {
+    logger.errorWithTrace("Multi-workflow dashboard request failed", error, {
+      code,
+      method: request.method.toUpperCase(),
+      path: new URL(request.url).pathname,
+    });
+
+    set.status = 500;
+    return errorEnvelope("internal_error", "Internal server error");
+  });
+
   app.get("/", () => {
     return new Response(renderDashboardHtml(), {
       headers: {
@@ -89,20 +112,30 @@ const buildApp = (
     });
   });
 
-  app.get("/api/v1/workflows", () => {
-    return workflowsPayload(entriesProvider());
+  app.get("/api/v1/workflows", ({ set }) => {
+    try {
+      return workflowsPayload(entriesProvider());
+    } catch (error) {
+      set.status = 500;
+      return errorEnvelope("internal_error", `Failed to build workflows payload: ${formatError(error)}`);
+    }
   });
 
   app.get("/api/v1/workflows/:key", ({ params, set }) => {
-    const key = params.key;
-    const entry = entriesProvider().find((candidate) => candidate.key === key) ?? null;
+    try {
+      const key = params.key;
+      const entry = entriesProvider().find((candidate) => candidate.key === key) ?? null;
 
-    if (!entry) {
-      set.status = 404;
-      return errorEnvelope("workflow_not_found", "Workflow not found");
+      if (!entry) {
+        set.status = 404;
+        return errorEnvelope("workflow_not_found", "Workflow not found");
+      }
+
+      return workflowDetailPayload(entry);
+    } catch (error) {
+      set.status = 500;
+      return errorEnvelope("internal_error", `Failed to build workflow detail payload: ${formatError(error)}`);
     }
-
-    return workflowDetailPayload(entry);
   });
 
   app.post("/api/v1/refresh", ({ set }) => {
@@ -120,6 +153,31 @@ const buildApp = (
         requested_at: entry.requestedAt.toISOString(),
       })),
     };
+  });
+
+  app.post("/api/v1/webhooks/:workflow_id", async ({ params, request, set }) => {
+    const workflowId = typeof params.workflow_id === "string" ? params.workflow_id.trim() : "";
+    if (!workflowId) {
+      set.status = 400;
+      return errorEnvelope("invalid_workflow_id", "workflow_id is required");
+    }
+
+    const entry = entriesProvider().find((candidate) => candidate.workflowId === workflowId) ?? null;
+    if (!entry) {
+      set.status = 404;
+      return errorEnvelope("workflow_not_found", "Workflow not found");
+    }
+
+    const refresh = refreshByKey(entry.key);
+    if (!refresh) {
+      set.status = 503;
+      return errorEnvelope("workflow_unavailable", "Workflow refresh unavailable");
+    }
+
+    const webhookPath = entry.webhookPath ?? "/api/v1/webhooks/linear";
+    const response = await forwardWebhookToWorkflow(request, entry.httpPort, webhookPath);
+    set.status = response.status;
+    return response.body;
   });
 
   app.all("*", ({ set }) => {
@@ -192,6 +250,14 @@ const errorEnvelope = (code: string, message: string) => ({
   },
 });
 
+const formatError = (error: unknown): string => {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return String(error);
+};
+
 const isMethodNotAllowed = (path: string, method: string): boolean => {
   if (path === "/") {
     return method !== "GET";
@@ -209,11 +275,76 @@ const isMethodNotAllowed = (path: string, method: string): boolean => {
     return method !== "POST";
   }
 
+  if (/^\/api\/v1\/webhooks\/[^/]+$/.test(path)) {
+    return method !== "POST";
+  }
+
   if (/^\/api\/v1\/workflows\/[^/]+$/.test(path)) {
     return method !== "GET";
   }
 
   return false;
+};
+
+const forwardWebhookToWorkflow = async (
+  request: Request,
+  port: number | null,
+  path: string,
+): Promise<{ status: number; body: Record<string, unknown> }> => {
+  if (typeof port !== "number") {
+    return {
+      status: 503,
+      body: errorEnvelope("workflow_http_unavailable", "Workflow HTTP server is unavailable"),
+    };
+  }
+
+  const rawBody = await request.text();
+  const headers = new Headers();
+  const contentType = request.headers.get("content-type");
+  const linearSignature = request.headers.get("linear-signature");
+  const xLinearSignature = request.headers.get("x-linear-signature");
+  const userAgent = request.headers.get("user-agent");
+
+  if (contentType) {
+    headers.set("content-type", contentType);
+  }
+  if (linearSignature) {
+    headers.set("linear-signature", linearSignature);
+  }
+  if (xLinearSignature) {
+    headers.set("x-linear-signature", xLinearSignature);
+  }
+  if (userAgent) {
+    headers.set("user-agent", userAgent);
+  }
+
+  try {
+    const upstream = await fetch(`http://127.0.0.1:${port}${path}`, {
+      method: "POST",
+      headers,
+      body: rawBody,
+    });
+
+    const payload = await upstream.json().catch(() => null);
+    if (payload && typeof payload === "object") {
+      return {
+        status: upstream.status,
+        body: payload as Record<string, unknown>,
+      };
+    }
+
+    return {
+      status: upstream.status,
+      body: upstream.ok
+        ? { accepted: true }
+        : errorEnvelope("upstream_error", `Workflow webhook returned HTTP ${upstream.status}`),
+    };
+  } catch (error) {
+    return {
+      status: 503,
+      body: errorEnvelope("workflow_http_proxy_error", `Failed to reach workflow webhook: ${formatError(error)}`),
+    };
+  }
 };
 
 const countStaleAgents = (snapshot: RuntimeSnapshot): number => {
@@ -796,6 +927,16 @@ ${renderBrandHead("Symphony Workboard")}
           background: rgba(31, 58, 54, 1);
           border-color: rgba(88, 214, 180, 0.9);
           box-shadow: 0 0 0 1px rgba(88, 214, 180, 0.12) inset;
+        }
+        .flow-node-card.alert {
+          background: rgba(64, 34, 39, 0.96);
+          border-color: rgba(255, 139, 127, 0.72);
+          box-shadow: 0 0 0 1px rgba(255, 139, 127, 0.12) inset;
+        }
+        .flow-node-card.current.alert {
+          background: rgba(79, 38, 44, 1);
+          border-color: rgba(255, 139, 127, 0.95);
+          box-shadow: 0 0 0 1px rgba(255, 139, 127, 0.2) inset;
         }
         .flow-node-card-head {
           display: flex;
@@ -1462,12 +1603,12 @@ ${renderBrandHead("Symphony Workboard")}
 
         async function fetchWorkflows() {
           const res = await fetch('/api/v1/workflows');
-          return res.json();
+          return readJsonResponse(res, 'workflows list');
         }
 
         async function fetchWorkflowDetail(key) {
           const res = await fetch('/api/v1/workflows/' + encodeURIComponent(key));
-          return res.json();
+          return readJsonResponse(res, 'workflow detail');
         }
 
         async function refreshAll() {
@@ -1866,16 +2007,18 @@ ${renderBrandHead("Symphony Workboard")}
           const checking = polling && polling.checking === true;
           const interval = polling ? formatMilliseconds(polling.poll_interval_ms) : 'n/a';
           const nextSweep = polling ? formatMilliseconds(polling.next_poll_in_ms) : 'n/a';
+          const intervalMs = polling ? Number(polling.poll_interval_ms || 0) : 0;
+          const webhookMode = Number.isFinite(intervalMs) && intervalMs <= 0;
 
           return '<article class="metric-card polling-card">' +
             '<div class="metric-label">Polling</div>' +
-            '<div class="metric-value polling-value">' + escapeHtml(checking ? 'Reconciling now' : 'Next sweep in ' + nextSweep) + '</div>' +
+            '<div class="metric-value polling-value">' + escapeHtml(checking ? 'Reconciling now' : (webhookMode ? 'Waiting for webhook' : 'Next sweep in ' + nextSweep)) + '</div>' +
             '<div class="progress-track">' +
               '<div class="progress-fill ' + (checking ? 'is-checking' : '') + '" style="width:' + String(progress) + '%"></div>' +
             '</div>' +
             '<div class="progress-meta">' +
-              '<span>' + escapeHtml(checking ? 'Workflow check in progress.' : 'Cadence ' + interval) + '</span>' +
-              '<span>' + escapeHtml(checking ? 'live' : nextSweep + ' remaining') + '</span>' +
+              '<span>' + escapeHtml(checking ? 'Workflow check in progress.' : (webhookMode ? 'No periodic poll loop.' : 'Cadence ' + interval)) + '</span>' +
+              '<span>' + escapeHtml(checking ? 'live' : (webhookMode ? 'event-driven' : nextSweep + ' remaining')) + '</span>' +
             '</div>' +
           '</article>';
         }
@@ -1951,9 +2094,10 @@ ${renderBrandHead("Symphony Workboard")}
           const nodeCards = lanes.map((lane, index) => {
             const x = paddingX + index * (nodeWidth + gap);
             const status = lane.current ? 'current' : lane.count > 0 ? 'active' : currentIndex > index && currentIndex >= 0 ? 'upstream' : 'idle';
+            const toneClass = lane.tone === 'alert' ? ' alert' : '';
             const subtitle = lane.state || 'step';
 
-            return '<article class="flow-node-card ' + status + '" style="left:' + x + 'px; top:' + (centerY - nodeHeight / 2) + 'px; width:' + nodeWidth + 'px; height:' + nodeHeight + 'px;">' +
+            return '<article class="flow-node-card ' + status + toneClass + '" style="left:' + x + 'px; top:' + (centerY - nodeHeight / 2) + 'px; width:' + nodeWidth + 'px; height:' + nodeHeight + 'px;">' +
               '<div class="flow-node-card-head">' +
                 '<div class="flow-node-card-label">' + escapeHtml(lane.label) + '</div>' +
                 '<div class="flow-node-card-count">' + escapeHtml(String(lane.count)) + '</div>' +
@@ -2333,11 +2477,33 @@ ${renderBrandHead("Symphony Workboard")}
         }
 
         function safeJsonParse(value) {
+          if (typeof value !== 'string') {
+            return null;
+          }
           try {
             return JSON.parse(value);
           } catch (error) {
             return null;
           }
+        }
+
+        async function readJsonResponse(response, context) {
+          const body = await response.text();
+          const parsed = safeJsonParse(body);
+          if (parsed && typeof parsed === 'object') {
+            return parsed;
+          }
+
+          return {
+            error: {
+              code: 'invalid_json',
+              message: response.ok
+                ? 'Received invalid JSON for ' + context + '.'
+                : 'Request failed for ' + context + ' with status ' + response.status + '.',
+            },
+            status: response.status,
+            body: truncate(body || '', 300),
+          };
         }
 
         function humanizeActivityLabel(value) {
@@ -2393,14 +2559,20 @@ ${renderBrandHead("Symphony Workboard")}
               description: null,
             }));
 
-          const lanes = configuredStages.concat(extraStates).map((stage) => ({
+          const lanes = configuredStages.concat(extraStates).map((stage) => {
+            const stageText = [stage.state, stage.label, stage.id].filter(Boolean).join(' ');
+            const isAlertLane = /(^|\\s)(failed?|failure|error|blocked?|retry)(\\s|$)/i.test(stageText);
+
+            return {
             id: stage.id,
             label: stage.label,
             state: stage.state,
             description: stage.description,
             count: stage.state ? stateCounts.get(stage.state) || 0 : 0,
             current: primaryEntry ? (primaryEntry.state || 'Working') === stage.state : false,
-          }));
+            tone: isAlertLane ? 'alert' : 'default',
+            };
+          });
 
           if (retrying.length > 0) {
             lanes.push({
@@ -2410,6 +2582,7 @@ ${renderBrandHead("Symphony Workboard")}
               description: 'Issues waiting for retry backoff before the next automated attempt.',
               count: retrying.length,
               current: !primaryEntry,
+              tone: 'alert',
             });
           }
 

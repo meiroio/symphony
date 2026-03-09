@@ -15,6 +15,8 @@ const buildConfig = (workspaceRoot: string, hooks: Partial<EffectiveConfig["hook
     teamKey: null,
     teamId: null,
     assignee: null,
+    webhookPath: null,
+    webhookSecret: null,
     requiredLabels: [],
     activeStates: ["Todo"],
     terminalStates: ["Done"],

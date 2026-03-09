@@ -18,6 +18,7 @@ Implemented foundation:
   - `GET /api/v1/state`
   - `GET /api/v1/:issue_identifier`
   - `POST /api/v1/refresh`
+  - `POST <tracker.webhook_path>` for Linear webhooks (default `/api/v1/webhooks/linear`)
 
 ## Runtime
 
@@ -28,6 +29,66 @@ bun run src/cli.ts /absolute/path/to/WORKFLOW.md --port 8787
 ```
 
 If no workflow path is passed, the CLI uses `./WORKFLOW.md` from the current working directory.
+
+## Docker
+
+Build image:
+
+```bash
+cd bun
+docker build -t symphony-bun:latest .
+```
+
+Run via Docker Compose (prewired for the two production workflows):
+
+```bash
+cd bun
+cp .env.example .env
+# edit .env and set your secrets
+docker compose up --build
+```
+
+Run hardened profile (read-only root filesystem + dropped capabilities):
+
+```bash
+cd bun
+docker compose -f docker-compose.yml -f docker-compose.hardened.yml up --build
+```
+
+Auth and tooling in container:
+
+- Image installs `codex`, `git`, `gh`, `jq`, `ripgrep`, `fd`, `curl`, `ssh`, `zip/unzip`, and core shell utilities.
+- Codex auth uses account login (device flow).
+- One-time setup after container starts:
+  - `docker compose exec symphony codex login --device-auth`
+  - `docker compose exec symphony codex login status`
+- Codex credentials persist in Docker volume `symphony_codex_home` (`/home/bun/.codex`).
+- `gh` can use `GH_TOKEN` / `GITHUB_TOKEN`, or mounted host config (`~/.config/gh`).
+- Use `.env.example` as a template for required env vars.
+
+Run (image-bundled workflows):
+
+```bash
+cd bun
+docker run --rm \
+  -p 8788:8788 \
+  -e LINEAR_API_KEY="$LINEAR_API_KEY" \
+  -e LINEAR_WEBHOOK_SECRET="$LINEAR_WEBHOOK_SECRET" \
+  -v /tmp/symphony-bun-workspaces:/tmp/symphony-bun-workspaces \
+  -v symphony_codex_home:/home/bun/.codex \
+  -v "${HOME}/.ssh:/home/bun/.ssh:ro" \
+  -v "${HOME}/.gitconfig:/home/bun/.gitconfig:ro" \
+  -v "${HOME}/.config/gh:/home/bun/.config/gh:ro" \
+  symphony-bun:latest
+```
+
+Notes:
+
+- Container entrypoint runs `bun run src/run-workflows.ts ./workflows`.
+- Image bakes `./workflows` at build time.
+- Rebuild the image whenever packaged workflow files change.
+- Publish `8788` for dashboard and Bun webhook ingress.
+- For Git operations inside agents, mount SSH and git config (compose already does this).
 
 Single-workflow shortcuts from `package.json`:
 
@@ -74,6 +135,37 @@ bun run workflows
 - Startup fails if the directory contains no workflow files.
 - This is the simplest way to run the whole local or production workflow set.
 - To use a different directory, run `bun run src/run-workflows.ts /absolute/path/to/workflows`.
+
+## Linear Webhook Mode
+
+To run push-driven orchestration (Linear -> Symphony) instead of periodic polling:
+
+1. Set workflow tracker webhook config:
+
+```yaml
+tracker:
+  kind: linear
+  webhook_path: "/api/v1/webhooks/linear"
+  webhook_secret: "$LINEAR_WEBHOOK_SECRET"
+polling:
+  interval_ms: 0
+```
+
+2. Expose the aggregate dashboard/ingress port publicly (HTTPS) and configure Linear webhook URLs by workflow id:
+
+```text
+https://<your-host>/api/v1/webhooks/linear-team-review
+https://<your-host>/api/v1/webhooks/linear-timetracking-factory
+```
+
+3. Use the same signing secret value in Linear webhook settings and `LINEAR_WEBHOOK_SECRET`.
+
+Notes:
+
+- `polling.interval_ms: 0` disables periodic polling loops.
+- Symphony still supports `POST /api/v1/refresh` for manual kicks.
+- Keep `webhook_secret` set in production; unsigned payloads are rejected when secret is configured.
+- In multi-workflow mode, Bun routes webhook ingress on `8788` to the matching workflow by `workflow.id`.
 
 ## Aggregate Dashboard
 

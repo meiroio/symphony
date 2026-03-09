@@ -9,6 +9,7 @@ const levelOrder: Record<LogLevel, number> = {
 
 const envLevel = (Bun.env.SYMPHONY_LOG_LEVEL ?? "info").toLowerCase() as LogLevel;
 const threshold = levelOrder[envLevel] ?? levelOrder.info;
+const debugEnabled = threshold <= levelOrder.debug;
 
 const formatValue = (value: unknown): string => {
   if (value === null || value === undefined) {
@@ -75,4 +76,18 @@ export const logger = {
   warn: (message: string, context?: Record<string, unknown>) => write("warn", message, context),
   error: (message: string, context?: Record<string, unknown>) =>
     write("error", message, context),
+  errorWithTrace: (message: string, error: unknown, context: Record<string, unknown> = {}) => {
+    const reason = error instanceof Error ? error.message : String(error);
+    const logContext: Record<string, unknown> = {
+      ...context,
+      reason,
+    };
+
+    if (debugEnabled && error instanceof Error && error.stack) {
+      logContext.trace = error.stack;
+    }
+
+    write("error", message, logContext);
+  },
+  isDebugEnabled: (): boolean => debugEnabled,
 };

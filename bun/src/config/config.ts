@@ -18,6 +18,7 @@ import {
 const DEFAULT_ACTIVE_STATES = ["Todo", "In Progress"];
 const DEFAULT_TERMINAL_STATES = ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"];
 const DEFAULT_LINEAR_ENDPOINT = "https://api.linear.app/graphql";
+const DEFAULT_LINEAR_WEBHOOK_PATH = "/api/v1/webhooks/linear";
 const DEFAULT_PROMPT_TEMPLATE = `You are working on a Linear issue.
 
 Identifier: {{ issue.identifier }}
@@ -128,12 +129,22 @@ export const resolveConfig = (
       teamKey: normalizeSecret(resolveEnvBackedSecret(tracker.team_key, env, null)),
       teamId: normalizeSecret(resolveEnvBackedSecret(tracker.team_id, env, null)),
       assignee: normalizeSecret(resolveEnvBackedSecret(tracker.assignee, env, env.LINEAR_ASSIGNEE ?? null)),
+      webhookPath: normalizeWebhookPath(
+        resolveEnvBackedSecret(
+          tracker.webhook_path,
+          env,
+          env.LINEAR_WEBHOOK_PATH ?? DEFAULT_LINEAR_WEBHOOK_PATH,
+        ),
+      ),
+      webhookSecret: normalizeSecret(
+        resolveEnvBackedSecret(tracker.webhook_secret, env, env.LINEAR_WEBHOOK_SECRET ?? null),
+      ),
       requiredLabels,
       activeStates,
       terminalStates,
     },
     polling: {
-      intervalMs: parsePositiveInteger(polling.interval_ms) ?? DEFAULT_POLL_INTERVAL_MS,
+      intervalMs: parseNonNegativeInteger(polling.interval_ms) ?? DEFAULT_POLL_INTERVAL_MS,
     },
     workspace: {
       root: resolvedWorkspaceRoot,
@@ -382,6 +393,21 @@ const normalizeHookScript = (value: unknown): string | null => {
   }
 
   return value.trimEnd();
+};
+
+const normalizeWebhookPath = (value: unknown): string | null => {
+  const normalized = normalizeValueToString(value);
+  if (normalized === null) {
+    return null;
+  }
+
+  const trimmed = normalized.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const withLeadingSlash = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  return withLeadingSlash.replace(/\/{2,}/g, "/");
 };
 
 const resolveCodexApprovalPolicy = (value: unknown): string | Record<string, unknown> => {

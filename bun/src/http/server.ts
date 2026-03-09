@@ -1,7 +1,11 @@
+import { Buffer } from "node:buffer";
+import { createHmac, timingSafeEqual } from "node:crypto";
+
 import { Elysia } from "elysia";
 
 import type { EffectiveConfig } from "../types";
 import { Orchestrator } from "../orchestrator/orchestrator";
+import { logger } from "../utils/logger";
 import { isBrandAssetPath, registerBrandRoutes, renderBrandHead, renderBrandMark } from "./favicon";
 import { issuePayload, refreshPayload, statePayload } from "./presenter";
 
@@ -44,6 +48,7 @@ const buildApp = (
   configProvider: () => EffectiveConfig,
 ): Elysia => {
   const app = new Elysia();
+  const linearWebhookPath = resolveLinearWebhookPath(configProvider);
 
   registerBrandRoutes(app);
 
@@ -51,12 +56,23 @@ const buildApp = (
     const path = new URL(request.url).pathname;
     const method = request.method.toUpperCase();
 
-    if (isMethodNotAllowed(path, method)) {
+    if (isMethodNotAllowed(path, method, linearWebhookPath)) {
       set.status = 405;
       return errorEnvelope("method_not_allowed", "Method not allowed");
     }
 
     return;
+  });
+
+  app.onError(({ error, request, set, code }) => {
+    logger.errorWithTrace("HTTP request failed", error, {
+      code,
+      method: request.method.toUpperCase(),
+      path: new URL(request.url).pathname,
+    });
+
+    set.status = 500;
+    return errorEnvelope("internal_error", "Internal server error");
   });
 
   app.get("/", () => {
@@ -94,6 +110,75 @@ const buildApp = (
     );
   });
 
+  if (linearWebhookPath) {
+    app.post(linearWebhookPath, async ({ request, set }) => {
+      const config = configProvider();
+      if (config.tracker.kind !== "linear") {
+        set.status = 404;
+        return errorEnvelope("not_found", "Route not found");
+      }
+
+      const rawBody = await request.text();
+
+      if (
+        config.tracker.webhookSecret &&
+        !hasValidLinearWebhookSignature(
+          rawBody,
+          request.headers.get("linear-signature") ?? request.headers.get("x-linear-signature"),
+          config.tracker.webhookSecret,
+        )
+      ) {
+        logger.warn("Linear webhook rejected: invalid signature", {
+          workflow_id: config.workflowId ?? "workflow",
+          webhook_path: linearWebhookPath,
+        });
+        set.status = 401;
+        return errorEnvelope("invalid_signature", "Invalid webhook signature");
+      }
+
+      const payload = parseWebhookPayload(rawBody);
+      if (payload === null) {
+        set.status = 400;
+        return errorEnvelope("invalid_json", "Invalid webhook JSON payload");
+      }
+
+      const action = maybeString(payload.action);
+      const eventType = maybeString(payload.type);
+
+      try {
+        const refresh = orchestrator.requestRefresh();
+        logger.info("Linear webhook accepted", {
+          workflow_id: config.workflowId ?? "workflow",
+          webhook_path: linearWebhookPath,
+          event_type: eventType,
+          event_action: action,
+          coalesced: refresh.coalesced,
+        });
+
+        set.status = 202;
+        return {
+          queued: true,
+          coalesced: refresh.coalesced,
+          requested_at: refresh.requestedAt.toISOString(),
+          source: "linear_webhook",
+          event: {
+            type: eventType,
+            action,
+          },
+        };
+      } catch (error) {
+        logger.errorWithTrace("Failed to process Linear webhook", error, {
+          workflow_id: config.workflowId ?? "workflow",
+          webhook_path: linearWebhookPath,
+          event_type: eventType,
+          event_action: action,
+        });
+        set.status = 503;
+        return errorEnvelope("orchestrator_unavailable", "Orchestrator unavailable");
+      }
+    });
+  }
+
   app.get("/api/v1/:issue_identifier", ({ params, set }) => {
     const identifier = params.issue_identifier;
 
@@ -128,7 +213,11 @@ const errorEnvelope = (code: string, message: string) => {
   };
 };
 
-const isMethodNotAllowed = (path: string, method: string): boolean => {
+const isMethodNotAllowed = (
+  path: string,
+  method: string,
+  linearWebhookPath: string | null,
+): boolean => {
   if (path === "/") {
     return method !== "GET";
   }
@@ -145,11 +234,98 @@ const isMethodNotAllowed = (path: string, method: string): boolean => {
     return method !== "POST";
   }
 
+  if (linearWebhookPath && path === linearWebhookPath) {
+    return method !== "POST";
+  }
+
   if (/^\/api\/v1\/[^/]+$/.test(path)) {
     return method !== "GET";
   }
 
   return false;
+};
+
+const resolveLinearWebhookPath = (configProvider: () => EffectiveConfig): string | null => {
+  try {
+    const config = configProvider();
+    if (config.tracker.kind !== "linear") {
+      return null;
+    }
+
+    const rawPath = config.tracker.webhookPath?.trim();
+    if (!rawPath) {
+      return null;
+    }
+
+    const normalized = rawPath.startsWith("/") ? rawPath : `/${rawPath}`;
+    return normalized.replace(/\/{2,}/g, "/");
+  } catch {
+    return null;
+  }
+};
+
+const hasValidLinearWebhookSignature = (
+  rawBody: string,
+  signatureHeader: string | null,
+  secret: string,
+): boolean => {
+  if (!signatureHeader) {
+    return false;
+  }
+
+  const received = signatureHeader.trim().toLowerCase();
+  if (!received) {
+    return false;
+  }
+
+  const digestHex = createHmac("sha256", secret).update(rawBody).digest("hex");
+  const expectedVariants = new Set([digestHex, `sha256=${digestHex}`]);
+
+  if (expectedVariants.has(received)) {
+    return true;
+  }
+
+  for (const expected of expectedVariants) {
+    if (safeTimingEqual(received, expected)) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+const safeTimingEqual = (left: string, right: string): boolean => {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  if (leftBuffer.length !== rightBuffer.length) {
+    return false;
+  }
+
+  return timingSafeEqual(leftBuffer, rightBuffer);
+};
+
+const parseWebhookPayload = (rawBody: string): Record<string, unknown> | null => {
+  const text = rawBody.trim().length === 0 ? "{}" : rawBody;
+
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+};
+
+const maybeString = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 };
 
 const renderDashboardHtml = (): string => {

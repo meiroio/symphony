@@ -47,6 +47,7 @@ export const main = async (rawArgs: string[] = Bun.argv.slice(2)): Promise<void>
                 workflowId: snapshot.workflowId ?? started?.workflowId ?? null,
                 workflowPath: snapshot.workflowPath ?? started?.workflowPath ?? spec.workflowPath,
                 httpPort: started?.httpPort ?? null,
+                webhookPath: config.tracker.webhookPath ?? null,
                 tracker: trackerSummaryFromConfig(config),
                 visualization: config.workflowVisualization ?? null,
                 snapshot,
@@ -66,6 +67,27 @@ export const main = async (rawArgs: string[] = Bun.argv.slice(2)): Promise<void>
                 requestedAt: refresh.requestedAt,
               };
             }),
+          refreshByKey: (targetKey) => {
+            const spec = serviceSpecs.find((candidate, index) => {
+              const snapshot = candidate.service.getOrchestrator().snapshot();
+              const key = `${snapshot.workflowId ?? `workflow-${index}`}:${index}`;
+              return key === targetKey;
+            });
+
+            if (!spec) {
+              return null;
+            }
+
+            const refresh = spec.service.getOrchestrator().requestRefresh();
+            const snapshot = spec.service.getOrchestrator().snapshot();
+            return {
+              key: targetKey,
+              workflowId: snapshot.workflowId ?? null,
+              workflowPath: snapshot.workflowPath ?? spec.workflowPath,
+              coalesced: refresh.coalesced,
+              requestedAt: refresh.requestedAt,
+            };
+          },
         })
       : null;
 

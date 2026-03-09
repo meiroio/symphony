@@ -235,6 +235,8 @@ const startServer = (snapshot: RuntimeSnapshot): { baseUrl: string } => {
       teamKey: null,
       teamId: null,
       assignee: null,
+      webhookPath: null,
+      webhookSecret: null,
       requiredLabels: [],
       activeStates: ["Todo"],
       terminalStates: ["Done"],

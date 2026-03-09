@@ -168,6 +168,8 @@ const buildConfig = (workspaceRoot: string, logPath: string, mode: string): Effe
       teamKey: null,
       teamId: null,
       assignee: null,
+      webhookPath: null,
+      webhookSecret: null,
       requiredLabels: [],
       activeStates: ["Todo", "In Progress"],
       terminalStates: ["Done", "Closed"],

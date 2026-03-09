@@ -5,6 +5,8 @@ tracker:
   kind: linear
   project_slug: "<your-linear-project-slug>"
   api_key: "$LINEAR_API_KEY"
+  webhook_path: "/api/v1/webhooks/linear"
+  webhook_secret: "$LINEAR_WEBHOOK_SECRET"
   active_states:
     - Todo
     - In Progress
@@ -17,7 +19,7 @@ tracker:
     - Canceled
     - Duplicate
 polling:
-  interval_ms: 5000
+  interval_ms: 0
 workspace:
   root: /tmp/symphony-bun-workspaces
 repositories:

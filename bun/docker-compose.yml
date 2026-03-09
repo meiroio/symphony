@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  symphony:
+    container_name: symphony-bun
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: symphony-bun:latest
+    restart: unless-stopped
+    environment:
+      LINEAR_API_KEY: ${LINEAR_API_KEY:-}
+      LINEAR_WEBHOOK_SECRET: ${LINEAR_WEBHOOK_SECRET:-}
+      GH_TOKEN: ${GH_TOKEN:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      SYMPHONY_LOG_LEVEL: ${SYMPHONY_LOG_LEVEL:-info}
+      SYMPHONY_DASHBOARD_PORT: ${SYMPHONY_DASHBOARD_PORT:-8788}
+    ports:
+      - "8788:8788"
+    volumes:
+      - symphony_workspaces:/tmp/symphony-bun-workspaces
+      - symphony_codex_home:/home/bun/.codex
+      - ${HOME}/.ssh:/home/bun/.ssh:ro
+      - ${HOME}/.gitconfig:/home/bun/.gitconfig:ro
+      - ${HOME}/.config/gh:/home/bun/.config/gh:ro
+
+volumes:
+  symphony_workspaces:
+  symphony_codex_home:
