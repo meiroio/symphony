@@ -63,8 +63,12 @@ Auth and tooling in container:
   - `docker compose exec symphony codex login --device-auth`
   - `docker compose exec symphony codex login status`
 - Codex credentials persist in Docker volume `symphony_codex_home` (`/home/bun/.codex`).
-- `gh` can use `GH_TOKEN` / `GITHUB_TOKEN`, or mounted host config (`~/.config/gh`).
+- GitHub auth uses host CLI session mounted into container (`~/.config/gh`).
+- One-time setup on host:
+  - `gh auth login`
+  - `gh auth status`
 - Use `.env.example` as a template for required env vars.
+- For Docker, set `SYMPHONY_DASHBOARD_HOST=0.0.0.0` (already in `.env.example`) so host port mapping can reach the dashboard.
 
 Run (image-bundled workflows):
 
@@ -76,9 +80,9 @@ docker run --rm \
   -e LINEAR_WEBHOOK_SECRET="$LINEAR_WEBHOOK_SECRET" \
   -v /tmp/symphony-bun-workspaces:/tmp/symphony-bun-workspaces \
   -v symphony_codex_home:/home/bun/.codex \
+  -v symphony_gh_home:/home/bun/.config/gh \
   -v "${HOME}/.ssh:/home/bun/.ssh:ro" \
   -v "${HOME}/.gitconfig:/home/bun/.gitconfig:ro" \
-  -v "${HOME}/.config/gh:/home/bun/.config/gh:ro" \
   symphony-bun:latest
 ```
 

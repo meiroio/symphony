@@ -29,7 +29,7 @@ export const main = async (rawArgs: string[] = Bun.argv.slice(2)): Promise<void>
     started: null as { httpPort: number | null; workflowId: string; workflowPath: string } | null,
   }));
 
-  const dashboardHost = "127.0.0.1";
+  const dashboardHost = Bun.env.SYMPHONY_DASHBOARD_HOST?.trim() || "127.0.0.1";
   const defaultDashboardPort = parseEnvPort(Bun.env.SYMPHONY_DASHBOARD_PORT) ?? 8788;
   const dashboardPort = options.dashboardPort ?? defaultDashboardPort;
   const dashboard =
