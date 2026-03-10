@@ -67,6 +67,7 @@ Auth and tooling in container:
 - One-time setup on host:
   - `gh auth login`
   - `gh auth status`
+  - `gh auth setup-git`
 - Use `.env.example` as a template for required env vars.
 - For Docker, set `SYMPHONY_DASHBOARD_HOST=0.0.0.0` (already in `.env.example`) so host port mapping can reach the dashboard.
 
@@ -260,6 +261,7 @@ Workflow file:
 - Do not commit tokens; keep secrets local.
 - Configure `repositories` so each issue workspace clones the correct repo(s) automatically.
 - Make sure `repositories[].remote` points to the correct repository for that workflow.
+- For GitHub HTTPS auth via `gh`, set `repositories[].transport: gh` and use `https://github.com/<owner>/<repo>.git` or `<owner>/<repo>` as the remote.
 - For team-wide review automation, start from `./WORKFLOW.linear.team-review.sample.md` and use `tracker.team_key` (for example `PIP`) instead of `project_slug`.
 - For phased software-factory automation (Define -> In Progress -> Code Review -> Design Review -> Testing -> Done), start from `./WORKFLOW.linear.software-factory.sample.md`.
 - For the TimeTracking factory specifically, start from `./WORKFLOW.linear.timetracking.factory.sample.md`.
@@ -278,12 +280,14 @@ Notes:
 - If `workflows/WORKFLOW.linear.local.md` uses `api_key: "$LINEAR_API_KEY"`, export your
   token in the same shell before starting the service.
 - `repositories[].checkout` supports env references (for example `"$SYMPHONY_DEFAULT_BRANCH"`).
+- `repositories[].transport` defaults to `git`; set it to `gh` to clone through authenticated GitHub CLI instead of raw `git clone`.
 - If a repository checkout branch is omitted or env resolution is missing, Symphony falls back to `SYMPHONY_DEFAULT_BRANCH` (or `main` when unset).
 - `prompt.variables` values are exposed to templates under `vars.*` (example: `{{ vars.testing_command }}`).
 - `agent.continuation_states` controls which states auto-retry immediately after a successful run.
 - For full MVP verification details, use
   [`docs/mvp-manual-test.md`](./docs/mvp-manual-test.md).
 - `repositories` entries are cloned on workspace creation, so the agent works in a deterministic repo layout.
+- When `repositories[].transport` is `gh`, Symphony clones with `gh repo clone` and then keeps `origin` aligned with the configured HTTPS remote for later `fetch`/`pull` runs.
 - On subsequent runs for the same workspace, Symphony attempts `git fetch` + `git pull --ff-only` for configured repositories when the working tree is clean.
 - If a repository has local changes, pull is skipped for safety and work continues with current workspace state.
 - Team scope is supported directly in polling (`tracker.team_key` / `tracker.team_id`); a separate webhook is not required for team visibility.

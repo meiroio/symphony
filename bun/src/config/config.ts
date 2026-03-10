@@ -561,6 +561,7 @@ const normalizeRepositories = (
     const checkout = resolveEnvBackedSecret(raw.checkout, env, defaultCheckout) ?? defaultCheckout;
     const target = normalizeRepositoryTarget(resolveEnvBackedSecret(raw.target, env, ".") ?? ".");
     const primary = raw.primary === true;
+    const transport = normalizeRepositoryTransport(raw.transport);
 
     parsed.push({
       id,
@@ -568,6 +569,7 @@ const normalizeRepositories = (
       checkout,
       target,
       primary,
+      transport,
     });
   }
 
@@ -596,6 +598,15 @@ const normalizeRepositoryTarget = (value: unknown): string => {
   }
 
   return trimmed;
+};
+
+const normalizeRepositoryTransport = (value: unknown): RepositoryConfig["transport"] => {
+  const asString = normalizeNonEmptyString(value)?.toLowerCase();
+  if (asString === "gh" || asString === "github") {
+    return "gh";
+  }
+
+  return "git";
 };
 
 const normalizePromptVariables = (value: unknown): Record<string, unknown> => {

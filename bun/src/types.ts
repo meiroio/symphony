@@ -27,12 +27,15 @@ export interface WorkflowDefinition {
   promptTemplate: string;
 }
 
+export type RepositoryTransport = "git" | "gh";
+
 export interface RepositoryConfig {
   id: string;
   remote: string;
   checkout: string;
   target: string;
   primary: boolean;
+  transport: RepositoryTransport;
 }
 
 export interface HookConfig {

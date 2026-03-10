@@ -66,7 +66,7 @@ export class WorkspaceManager {
         continue;
       }
 
-      const args = ["git", "clone", "--branch", repository.checkout, repository.remote, targetPath];
+      const args = this.cloneRepositoryCommand(repository, targetPath);
       const result = await this.runCommand(args, workspace, GIT_CLONE_TIMEOUT_MS);
 
       if (result.exitCode !== 0) {
@@ -74,6 +74,7 @@ export class WorkspaceManager {
           issue_id: issue.issueId,
           issue_identifier: issue.issueIdentifier,
           repository_id: repository.id,
+          transport: repository.transport,
           remote: repository.remote,
           target: repository.target,
           output: truncate(`${result.stdout}\n${result.stderr}`.trim()),
@@ -84,6 +85,7 @@ export class WorkspaceManager {
         issue_id: issue.issueId,
         issue_identifier: issue.issueIdentifier,
         repository_id: repository.id,
+        transport: repository.transport,
         remote: repository.remote,
         checkout: repository.checkout,
         target: repository.target,
@@ -97,6 +99,11 @@ export class WorkspaceManager {
     repository: NonNullable<EffectiveConfig["repositories"]>[number],
     issue: IssueContext,
   ): Promise<void> {
+    const desiredOrigin = this.repositoryOriginUrl(repository);
+    if (desiredOrigin) {
+      await this.ensureRepositoryOrigin(targetPath, repository, issue, desiredOrigin);
+    }
+
     const statusResult = await this.runCommand(["git", "status", "--porcelain"], targetPath, GIT_SYNC_TIMEOUT_MS);
     if (statusResult.exitCode !== 0) {
       this.logWarn("Repository sync skipped; unable to read git status", {
@@ -202,9 +209,107 @@ export class WorkspaceManager {
       issue_id: issue.issueId,
       issue_identifier: issue.issueIdentifier,
       repository_id: repository.id,
+      transport: repository.transport,
       target: repository.target,
       path: targetPath,
       branch: pullBranch,
+    });
+  }
+
+  private cloneRepositoryCommand(
+    repository: NonNullable<EffectiveConfig["repositories"]>[number],
+    targetPath: string,
+  ): string[] {
+    if (repository.transport === "gh") {
+      return [
+        "gh",
+        "repo",
+        "clone",
+        repository.remote,
+        targetPath,
+        "--",
+        "--branch",
+        repository.checkout,
+      ];
+    }
+
+    return ["git", "clone", "--branch", repository.checkout, repository.remote, targetPath];
+  }
+
+  private repositoryOriginUrl(
+    repository: NonNullable<EffectiveConfig["repositories"]>[number],
+  ): string | null {
+    if (repository.transport !== "gh") {
+      return repository.remote;
+    }
+
+    if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(repository.remote) || repository.remote.startsWith("git@")) {
+      return repository.remote;
+    }
+
+    if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository.remote)) {
+      return `https://github.com/${repository.remote}.git`;
+    }
+
+    return repository.remote;
+  }
+
+  private async ensureRepositoryOrigin(
+    targetPath: string,
+    repository: NonNullable<EffectiveConfig["repositories"]>[number],
+    issue: IssueContext,
+    desiredOrigin: string,
+  ): Promise<void> {
+    const currentOriginResult = await this.runCommand(
+      ["git", "remote", "get-url", "origin"],
+      targetPath,
+      GIT_SYNC_TIMEOUT_MS,
+    );
+    if (currentOriginResult.exitCode !== 0) {
+      this.logWarn("Repository sync skipped; unable to read origin remote", {
+        issue_id: issue.issueId,
+        issue_identifier: issue.issueIdentifier,
+        repository_id: repository.id,
+        transport: repository.transport,
+        target: repository.target,
+        path: targetPath,
+        output: truncate(`${currentOriginResult.stdout}\n${currentOriginResult.stderr}`.trim()),
+      });
+      return;
+    }
+
+    const currentOrigin = currentOriginResult.stdout.trim();
+    if (currentOrigin === desiredOrigin) {
+      return;
+    }
+
+    const setOriginResult = await this.runCommand(
+      ["git", "remote", "set-url", "origin", desiredOrigin],
+      targetPath,
+      GIT_SYNC_TIMEOUT_MS,
+    );
+    if (setOriginResult.exitCode !== 0) {
+      this.logWarn("Repository sync failed while updating origin remote", {
+        issue_id: issue.issueId,
+        issue_identifier: issue.issueIdentifier,
+        repository_id: repository.id,
+        transport: repository.transport,
+        target: repository.target,
+        path: targetPath,
+        desired_origin: desiredOrigin,
+        output: truncate(`${setOriginResult.stdout}\n${setOriginResult.stderr}`.trim()),
+      });
+      return;
+    }
+
+    this.logInfo("Repository origin updated from workflow configuration", {
+      issue_id: issue.issueId,
+      issue_identifier: issue.issueIdentifier,
+      repository_id: repository.id,
+      transport: repository.transport,
+      target: repository.target,
+      path: targetPath,
+      desired_origin: desiredOrigin,
     });
   }
 
@@ -371,8 +476,10 @@ export class WorkspaceManager {
 
     const startedAt = Date.now();
 
-    const process = Bun.spawn(["sh", "-lc", script], {
+    const env = { ...process.env };
+    const proc = Bun.spawn(["sh", "-lc", script], {
       cwd: workspace,
+      env,
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -380,13 +487,13 @@ export class WorkspaceManager {
     let timedOut = false;
     const timeout = setTimeout(() => {
       timedOut = true;
-      process.kill();
+      proc.kill();
     }, timeoutMs);
 
     const [exitCode, stdoutText, stderrText] = await Promise.all([
-      process.exited,
-      new Response(process.stdout).text().catch(() => ""),
-      new Response(process.stderr).text().catch(() => ""),
+      proc.exited,
+      new Response(proc.stdout).text().catch(() => ""),
+      new Response(proc.stderr).text().catch(() => ""),
     ]);
 
     clearTimeout(timeout);
@@ -477,8 +584,10 @@ export class WorkspaceManager {
     cwd: string,
     timeoutMs: number,
   ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-    const process = Bun.spawn(args, {
+    const env = { ...process.env };
+    const proc = Bun.spawn(args, {
       cwd,
+      env,
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -486,13 +595,13 @@ export class WorkspaceManager {
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      process.kill();
+      proc.kill();
     }, timeoutMs);
 
     const [exitCode, stdout, stderr] = await Promise.all([
-      process.exited,
-      new Response(process.stdout).text().catch(() => ""),
-      new Response(process.stderr).text().catch(() => ""),
+      proc.exited,
+      new Response(proc.stdout).text().catch(() => ""),
+      new Response(proc.stderr).text().catch(() => ""),
     ]);
 
     clearTimeout(timer);

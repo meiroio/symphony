@@ -226,7 +226,7 @@ const repositoryPromptContext = (
   const lines = repositories.map((repository) => {
     const absolutePath = resolve(workspace, repository.target);
     const primary = repository.primary ? " (primary)" : "";
-    return `- ${repository.id}${primary}: ${absolutePath} [branch: ${repository.checkout}]`;
+    return `- ${repository.id}${primary}: ${absolutePath} [branch: ${repository.checkout}, transport: ${repository.transport}]`;
   });
 
   return `Repository setup:\n${lines.join("\n")}`;

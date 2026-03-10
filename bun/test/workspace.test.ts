@@ -144,6 +144,7 @@ describe("workspace manager", () => {
             checkout: "main",
             target: ".",
             primary: true,
+            transport: "git",
           },
         ],
       };
@@ -195,6 +196,7 @@ describe("workspace manager", () => {
             checkout: "main",
             target: ".",
             primary: true,
+            transport: "git",
           },
         ],
       };
@@ -212,6 +214,78 @@ describe("workspace manager", () => {
 
       expect((await readFile(join(workspace, "README.md"), "utf8")).trim()).toBe("v2");
     } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(fixture, { recursive: true, force: true });
+    }
+  });
+
+  test("bootstraps GitHub repositories through gh transport when configured", async () => {
+    const root = join(tmpdir(), `symphony-workspace-gh-${Date.now()}-${Math.random()}`);
+    const fixture = join(tmpdir(), `symphony-workspace-gh-fixture-${Date.now()}-${Math.random()}`);
+    const sourceRepo = join(fixture, "source-repo");
+    const remoteRepo = join(fixture, "remote.git");
+    const fakeBin = join(fixture, "bin");
+    const fakeGh = join(fakeBin, "gh");
+    const issueIdentifier = "MT-Gh";
+    const originalPath = process.env.PATH ?? "";
+
+    await rm(root, { recursive: true, force: true });
+    await rm(fixture, { recursive: true, force: true });
+
+    try {
+      await mkdir(sourceRepo, { recursive: true });
+      await mkdir(fakeBin, { recursive: true });
+
+      runCommand(["git", "init"], sourceRepo);
+      runCommand(["git", "config", "user.email", "bot@example.com"], sourceRepo);
+      runCommand(["git", "config", "user.name", "Symphony Bot"], sourceRepo);
+      runCommand(["git", "checkout", "-b", "main"], sourceRepo);
+      await writeFile(join(sourceRepo, "README.md"), "fixture\n", "utf8");
+      runCommand(["git", "add", "README.md"], sourceRepo);
+      runCommand(["git", "commit", "-m", "init"], sourceRepo);
+      runCommand(["git", "clone", "--bare", sourceRepo, remoteRepo], fixture);
+
+      await writeFile(
+        fakeGh,
+        `#!/bin/sh
+if [ "$1" != "repo" ] || [ "$2" != "clone" ]; then
+  exit 64
+fi
+repo="$3"
+dir="$4"
+shift 4
+if [ "$1" = "--" ]; then
+  shift
+fi
+exec git clone "$@" "$repo" "$dir"
+`,
+        "utf8",
+      );
+      runCommand(["chmod", "+x", fakeGh], fixture);
+      process.env.PATH = `${fakeBin}:${originalPath}`;
+
+      const config: EffectiveConfig = {
+        ...buildConfig(root),
+        repositories: [
+          {
+            id: "app",
+            remote: remoteRepo,
+            checkout: "main",
+            target: ".",
+            primary: true,
+            transport: "gh",
+          },
+        ],
+      };
+
+      const manager = new WorkspaceManager(() => config);
+      const workspace = await manager.createForIssue(issueIdentifier);
+
+      await access(join(workspace, ".git"));
+      expect((await readFile(join(workspace, "README.md"), "utf8")).trim()).toBe("fixture");
+      expect(runCommand(["git", "rev-parse", "--abbrev-ref", "HEAD"], workspace)).toBe("main");
+    } finally {
+      process.env.PATH = originalPath;
       await rm(root, { recursive: true, force: true });
       await rm(fixture, { recursive: true, force: true });
     }

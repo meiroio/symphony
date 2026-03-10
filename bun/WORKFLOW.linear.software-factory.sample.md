@@ -25,10 +25,11 @@ workspace:
   root: /tmp/symphony-bun-workspaces
 repositories:
   - id: app
-    remote: "<your-repository-ssh-or-https-url>"
+    remote: "https://github.com/<owner>/<repo>.git"
     checkout: main
     target: .
     primary: true
+    transport: gh
 agent:
   max_concurrent_agents: 1
   max_turns: 10

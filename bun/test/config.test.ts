@@ -168,6 +168,7 @@ describe("config", () => {
         checkout: "develop",
         target: ".",
         primary: false,
+        transport: "git",
       },
       {
         id: "repo_2",
@@ -175,6 +176,7 @@ describe("config", () => {
         checkout: "main",
         target: "deps/docs",
         primary: true,
+        transport: "git",
       },
     ]);
   });
@@ -215,6 +217,7 @@ describe("config", () => {
         checkout: "release",
         target: ".",
         primary: true,
+        transport: "git",
       },
       {
         id: "docs",
@@ -222,6 +225,7 @@ describe("config", () => {
         checkout: "dev",
         target: "deps/docs",
         primary: false,
+        transport: "git",
       },
       {
         id: "ops",
@@ -229,6 +233,58 @@ describe("config", () => {
         checkout: "dev",
         target: "deps/ops",
         primary: false,
+        transport: "git",
+      },
+    ]);
+  });
+
+  test("normalizes repository transport and supports gh/github aliases", () => {
+    const config = resolveConfig(
+      workflow({
+        repositories: [
+          {
+            id: "https-repo",
+            remote: "https://github.com/acme/app.git",
+            transport: "gh",
+          },
+          {
+            id: "slug-repo",
+            remote: "acme/docs",
+            transport: "github",
+          },
+          {
+            id: "ssh-repo",
+            remote: "git@work:acme/ops.git",
+          },
+        ],
+      }),
+      {},
+    );
+
+    expect(config.repositories).toEqual([
+      {
+        id: "https-repo",
+        remote: "https://github.com/acme/app.git",
+        checkout: "main",
+        target: ".",
+        primary: true,
+        transport: "gh",
+      },
+      {
+        id: "slug-repo",
+        remote: "acme/docs",
+        checkout: "main",
+        target: ".",
+        primary: false,
+        transport: "gh",
+      },
+      {
+        id: "ssh-repo",
+        remote: "git@work:acme/ops.git",
+        checkout: "main",
+        target: ".",
+        primary: false,
+        transport: "git",
       },
     ]);
   });
