@@ -1712,7 +1712,7 @@ ${renderBrandHead("Symphony Workboard")}
             const activeClass = entry.key === selectedKey ? 'active' : '';
             const running = entry.counts ? entry.counts.running : 0;
             const retrying = entry.counts ? entry.counts.retrying : 0;
-            const nextPoll = entry.polling ? formatMilliseconds(entry.polling.next_poll_in_ms) : 'n/a';
+            const sweepMeta = summarizeNextSweep(entry.polling);
             const health = workflowHealth(entry);
             const attention = workflowAttention(entry);
             const trackerText = trackerSummary(entry.tracker);
@@ -1736,7 +1736,7 @@ ${renderBrandHead("Symphony Workboard")}
                 pill('port ' + ((entry.http_port === null || entry.http_port === undefined) ? 'off' : entry.http_port), '') +
               '</div>' +
               '<div class="workflow-meta">' + escapeHtml(trackerText) + '</div>' +
-              '<div class="workflow-meta">next sweep ' + escapeHtml(nextPoll) + '</div>' +
+              '<div class="workflow-meta">' + escapeHtml(sweepMeta) + '</div>' +
               '<div class="workflow-meta">' + escapeHtml((entry.workflow && entry.workflow.path) || '') + '</div>' +
             '</button>';
           }).join('');
@@ -1768,7 +1768,6 @@ ${renderBrandHead("Symphony Workboard")}
           const retrying = Array.isArray(payload.retrying) ? payload.retrying : [];
           const health = detailHealth(payload);
           const attention = payloadAttention(payload);
-          const nextPoll = payload.polling ? formatMilliseconds(payload.polling.next_poll_in_ms) : 'n/a';
           const soloUrl = typeof payload.http_port === 'number' ? 'http://127.0.0.1:' + payload.http_port + '/' : null;
           const alertSummary = attentionSummary(attention);
           const trackerBadge = trackerBadgeLabel(payload.tracker || (chosen ? chosen.tracker : null));
@@ -1949,8 +1948,8 @@ ${renderBrandHead("Symphony Workboard")}
           const polling = payload.polling || {};
           const attention = payloadAttention(payload);
           lines.push('generated: ' + (payload.generated_at || 'n/a'));
-          lines.push('next sweep: ' + formatMilliseconds(polling.next_poll_in_ms));
-          lines.push('interval: ' + formatMilliseconds(polling.poll_interval_ms));
+          lines.push('next sweep: ' + telemetryNextSweep(polling));
+          lines.push('interval: ' + telemetryInterval(polling));
           lines.push('runtime: ' + formatSeconds(totals.seconds_running || 0));
           lines.push('attention: ' + attention.total + ' (' + attentionSummary(attention) + ')');
           lines.push('tokens.in: ' + formatCompactNumber(totals.input_tokens || 0));
@@ -2007,18 +2006,19 @@ ${renderBrandHead("Symphony Workboard")}
           const checking = polling && polling.checking === true;
           const interval = polling ? formatMilliseconds(polling.poll_interval_ms) : 'n/a';
           const nextSweep = polling ? formatMilliseconds(polling.next_poll_in_ms) : 'n/a';
-          const intervalMs = polling ? Number(polling.poll_interval_ms || 0) : 0;
-          const webhookMode = Number.isFinite(intervalMs) && intervalMs <= 0;
+          const intervalLabel = interval === 'n/a' ? 'unknown cadence' : interval;
+          const nextSweepLabel = nextSweep === 'n/a' ? 'soon' : nextSweep;
+          const webhookMode = isEventDrivenPolling(polling);
 
           return '<article class="metric-card polling-card">' +
             '<div class="metric-label">Polling</div>' +
-            '<div class="metric-value polling-value">' + escapeHtml(checking ? 'Reconciling now' : (webhookMode ? 'Waiting for webhook' : 'Next sweep in ' + nextSweep)) + '</div>' +
+            '<div class="metric-value polling-value">' + escapeHtml(checking ? 'Reconciling now' : (webhookMode ? 'Waiting for webhook' : 'Next sweep in ' + nextSweepLabel)) + '</div>' +
             '<div class="progress-track">' +
               '<div class="progress-fill ' + (checking ? 'is-checking' : '') + '" style="width:' + String(progress) + '%"></div>' +
             '</div>' +
             '<div class="progress-meta">' +
-              '<span>' + escapeHtml(checking ? 'Workflow check in progress.' : (webhookMode ? 'No periodic poll loop.' : 'Cadence ' + interval)) + '</span>' +
-              '<span>' + escapeHtml(checking ? 'live' : (webhookMode ? 'event-driven' : nextSweep + ' remaining')) + '</span>' +
+              '<span>' + escapeHtml(checking ? 'Workflow check in progress.' : (webhookMode ? 'No periodic poll loop.' : 'Cadence ' + intervalLabel)) + '</span>' +
+              '<span>' + escapeHtml(checking ? 'live' : (webhookMode ? 'event-driven' : nextSweepLabel + ' remaining')) + '</span>' +
             '</div>' +
           '</article>';
         }
@@ -2175,6 +2175,77 @@ ${renderBrandHead("Symphony Workboard")}
           }
 
           return ahead ? 'in ' + chunk : chunk + ' ago';
+        }
+
+        function isEventDrivenPolling(polling) {
+          if (!polling) {
+            return false;
+          }
+
+          const interval = Number(polling.poll_interval_ms);
+          return Number.isFinite(interval) && interval <= 0;
+        }
+
+        function summarizeNextSweep(polling) {
+          if (!polling) {
+            return 'next sweep unavailable';
+          }
+
+          if (polling.checking === true) {
+            return 'reconciling now';
+          }
+
+          if (isEventDrivenPolling(polling)) {
+            return 'event-driven';
+          }
+
+          const nextSweep = formatMilliseconds(polling.next_poll_in_ms);
+          return nextSweep === 'n/a' ? 'next sweep unavailable' : ('next sweep ' + nextSweep);
+        }
+
+        function telemetryNextSweep(polling) {
+          if (!polling) {
+            return 'unknown';
+          }
+
+          if (polling.checking === true) {
+            return 'in progress';
+          }
+
+          if (isEventDrivenPolling(polling)) {
+            return 'event-driven';
+          }
+
+          const nextSweep = formatMilliseconds(polling.next_poll_in_ms);
+          return nextSweep === 'n/a' ? 'unknown' : nextSweep;
+        }
+
+        function telemetryInterval(polling) {
+          if (!polling) {
+            return 'unknown';
+          }
+
+          if (isEventDrivenPolling(polling)) {
+            return 'disabled (webhook)';
+          }
+
+          const interval = formatMilliseconds(polling.poll_interval_ms);
+          return interval === 'n/a' ? 'unknown' : interval;
+        }
+
+        function idleNextStep(polling) {
+          if (isEventDrivenPolling(polling)) {
+            return {
+              title: 'Webhook trigger',
+              body: 'Waiting for the next Linear webhook event.',
+            };
+          }
+
+          const nextSweep = formatMilliseconds(polling ? polling.next_poll_in_ms : null);
+          return {
+            title: 'Next sweep',
+            body: 'Board scan in ' + (nextSweep === 'n/a' ? 'soon' : nextSweep) + '.',
+          };
         }
 
         function formatMilliseconds(value) {
@@ -2594,7 +2665,7 @@ ${renderBrandHead("Symphony Workboard")}
         }
 
         function workflowNarrative(payload, running, retrying, attention, stageSummary, visualization) {
-          const nextPoll = payload && payload.polling ? formatMilliseconds(payload.polling.next_poll_in_ms) : 'n/a';
+          const polling = payload && payload.polling ? payload.polling : null;
           const primary = stageSummary.primaryEntry;
           const primaryActivity = primary ? describeActivity(primary.last_message, primary.last_event) : null;
 
@@ -2607,7 +2678,7 @@ ${renderBrandHead("Symphony Workboard")}
             const stageBody = stage && stage.description
               ? stage.description
               : (primaryActivity ? (primaryActivity.title + '. ' + primaryActivity.meta) : 'Codex is currently working this lane.');
-            const next = buildNextTransitionCopy(visualization, stage, retrying, attention, payload, nextPoll);
+            const next = buildNextTransitionCopy(visualization, stage, retrying, attention, payload);
 
             return {
               nowTitle: 'Executing',
@@ -2648,14 +2719,15 @@ ${renderBrandHead("Symphony Workboard")}
             };
           }
 
+          const idleNext = idleNextStep(polling);
           return {
             nowTitle: 'Standing by',
             nowBody: 'No active agents and no queued retries in this workflow.',
             nowTone: '',
             stageTitle: 'Idle',
             stageBody: 'The workflow is waiting for the next eligible issue or a manual state change.',
-            nextTitle: 'Next sweep',
-            nextBody: 'Board scan in ' + nextPoll + '.',
+            nextTitle: idleNext.title,
+            nextBody: idleNext.body,
             nextTone: '',
           };
         }
@@ -2674,7 +2746,7 @@ ${renderBrandHead("Symphony Workboard")}
             : 'No lane guidance is configured for this state.';
         }
 
-        function buildNextTransitionCopy(visualization, stage, retrying, attention, payload, nextPoll) {
+        function buildNextTransitionCopy(visualization, stage, retrying, attention, payload) {
           if (attention.staleAgents > 0) {
             return {
               title: 'Operator check',
@@ -2701,11 +2773,8 @@ ${renderBrandHead("Symphony Workboard")}
           }
 
           if (!stage || !visualization || !Array.isArray(visualization.transitions)) {
-            return {
-              title: 'Next sweep',
-              body: 'Board scan in ' + nextPoll + '.',
-              tone: '',
-            };
+            const idleNext = idleNextStep(payload ? payload.polling : null);
+            return { title: idleNext.title, body: idleNext.body, tone: '' };
           }
 
           const outgoing = visualization.transitions.filter((transition) => transition.from === stage.id);
@@ -2720,9 +2789,18 @@ ${renderBrandHead("Symphony Workboard")}
             parts.push((failureTransition.label || 'Failure path remains in this lane') + '.');
           }
 
+          if (parts.length === 0) {
+            const idleNext = idleNextStep(payload ? payload.polling : null);
+            return {
+              title: successTransition ? transitionTargetLabel(visualization, successTransition.to) : idleNext.title,
+              body: idleNext.body,
+              tone: failureTransition && !successTransition ? 'alert' : '',
+            };
+          }
+
           return {
             title: successTransition ? transitionTargetLabel(visualization, successTransition.to) : 'Next sweep',
-            body: parts.join(' ') || ('Board scan in ' + nextPoll + '.'),
+            body: parts.join(' '),
             tone: failureTransition && !successTransition ? 'alert' : '',
           };
         }
