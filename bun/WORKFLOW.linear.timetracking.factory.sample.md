@@ -6,7 +6,7 @@ tracker:
   team_key: "TIM"
   api_key: "$LINEAR_API_KEY"
   webhook_path: "/api/v1/webhooks/linear"
-  webhook_secret: "$LINEAR_WEBHOOK_SECRET"
+  webhook_secret: "$LINEAR_TIM_WEBHOOK_SECRET"
   active_states:
     - Define
     - In Progress

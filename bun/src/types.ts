@@ -170,6 +170,7 @@ export interface RuntimeSnapshot {
   running: Array<{
     issueId: string;
     identifier: string;
+    issueTitle: string | null;
     state: string | null;
     sessionId: string | null;
     codexAppServerPid: string | null;

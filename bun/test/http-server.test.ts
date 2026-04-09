@@ -200,7 +200,7 @@ describe("http server", () => {
     expect(faviconResponse.headers.get("content-type")).toContain("image/svg+xml");
     const svg = await faviconResponse.text();
     expect(svg).toContain("<svg");
-    expect(svg).toContain("<rect");
+    expect(svg).toContain("<path");
 
     const touchIconResponse = await fetch(`${baseUrl}/apple-touch-icon.png`);
     expect(touchIconResponse.status).toBe(200);
@@ -294,6 +294,7 @@ const staticSnapshot = (): RuntimeSnapshot => {
       {
         issueId: "issue-http",
         identifier: "MT-HTTP",
+        issueTitle: "Issue HTTP",
         state: "In Progress",
         sessionId: "thread-http",
         codexAppServerPid: null,

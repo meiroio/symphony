@@ -575,6 +575,136 @@ ${renderBrandHead("Symphony Workboard")}
           grid-template-columns: repeat(4, minmax(0, 1fr));
           gap: 12px;
         }
+        .live-strip {
+          position: sticky;
+          top: 16px;
+          z-index: 6;
+          margin-bottom: 16px;
+          padding: 14px 16px 16px;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          background:
+            linear-gradient(180deg, rgba(15, 24, 34, 0.96), rgba(18, 31, 44, 0.92)),
+            radial-gradient(circle at top right, rgba(88, 214, 180, 0.12), transparent 42%);
+          backdrop-filter: blur(18px);
+        }
+        .live-strip-head {
+          display: flex;
+          align-items: end;
+          justify-content: space-between;
+          gap: 12px;
+        }
+        .live-strip-copy {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          min-width: 0;
+        }
+        .live-strip-kicker {
+          margin: 0;
+          color: var(--accent-strong);
+          font-size: 0.72rem;
+          font-weight: 700;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+        }
+        .live-strip-title {
+          margin: 0;
+          font-family: "Fraunces", Georgia, serif;
+          font-size: clamp(1.05rem, 1.6vw, 1.28rem);
+          line-height: 1;
+          letter-spacing: -0.02em;
+        }
+        .live-strip-note {
+          color: var(--muted);
+          font-size: 0.8rem;
+          line-height: 1.5;
+          text-align: right;
+          max-width: 32rem;
+        }
+        .live-strip-list {
+          display: grid;
+          grid-auto-flow: column;
+          grid-auto-columns: minmax(220px, 280px);
+          gap: 10px;
+          overflow-x: auto;
+          overflow-y: hidden;
+          padding-bottom: 4px;
+          scrollbar-gutter: stable both-edges;
+          scroll-snap-type: x proximity;
+        }
+        .live-workflow-card {
+          appearance: none;
+          width: 100%;
+          min-height: 104px;
+          padding: 14px 15px;
+          text-align: left;
+          border: 1px solid rgba(56, 73, 95, 0.94);
+          border-radius: 22px;
+          background: rgba(21, 32, 45, 0.92);
+          color: var(--text);
+          cursor: pointer;
+          box-shadow: var(--shadow-soft);
+          display: grid;
+          gap: 10px;
+          align-content: start;
+          transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+          scroll-snap-align: start;
+        }
+        .live-workflow-card:hover {
+          transform: translateY(-1px);
+          border-color: rgba(88, 214, 180, 0.3);
+        }
+        .live-workflow-card.active {
+          border-color: rgba(88, 214, 180, 0.48);
+          background: rgba(18, 37, 42, 0.95);
+          box-shadow: 0 0 0 4px rgba(88, 214, 180, 0.08), var(--shadow-soft);
+        }
+        .live-workflow-top {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          min-width: 0;
+        }
+        .live-workflow-state {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          min-width: 0;
+          color: var(--muted);
+          font-size: 0.76rem;
+          font-weight: 700;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+        }
+        .live-workflow-name {
+          margin: 0;
+          font-family: "Fraunces", Georgia, serif;
+          font-size: 1.02rem;
+          line-height: 1.05;
+          letter-spacing: -0.02em;
+          overflow-wrap: anywhere;
+        }
+        .live-workflow-meta {
+          color: var(--muted);
+          font-size: 0.8rem;
+          line-height: 1.45;
+          overflow-wrap: anywhere;
+        }
+        .live-workflow-empty {
+          min-height: 96px;
+          border: 1px dashed rgba(66, 82, 105, 0.92);
+          border-radius: 20px;
+          padding: 16px 18px;
+          display: flex;
+          align-items: center;
+          color: var(--muted);
+          font-size: 0.86rem;
+          line-height: 1.5;
+          background: rgba(18, 28, 40, 0.68);
+        }
         .stat-tile {
           padding: 14px 16px;
           display: flex;
@@ -1517,6 +1647,20 @@ ${renderBrandHead("Symphony Workboard")}
           }
         }
         @media (max-width: 980px) {
+          .live-strip {
+            top: 12px;
+          }
+          .live-strip-head {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+          .live-strip-note {
+            text-align: left;
+            max-width: none;
+          }
+          .live-strip-list {
+            grid-auto-columns: minmax(240px, 82vw);
+          }
           .layout {
             grid-template-columns: 1fr;
           }
@@ -1541,6 +1685,9 @@ ${renderBrandHead("Symphony Workboard")}
           .hero-head {
             flex-direction: column;
             align-items: flex-start;
+          }
+          .live-strip {
+            top: 10px;
           }
           .stage-head,
           .detail-hero-top {
@@ -1573,6 +1720,16 @@ ${renderBrandHead("Symphony Workboard")}
             Quiet workflows stay understated, pressure points stand out immediately, and each
             workflow opens into a focused activity view with agents, retries, and health signals.
           </p>
+        </section>
+        <section class="live-strip panel" aria-labelledby="running-workflows-title">
+          <div class="live-strip-head">
+            <div class="live-strip-copy">
+              <p class="live-strip-kicker">Flight deck</p>
+              <h2 class="live-strip-title" id="running-workflows-title">Running workflows</h2>
+            </div>
+            <div class="live-strip-note" id="running-workflows-note">Loading live workflow lanes...</div>
+          </div>
+          <div class="live-strip-list" id="running-workflows"></div>
         </section>
           <section class="layout">
           <aside class="panel rail">
@@ -1677,6 +1834,68 @@ ${renderBrandHead("Symphony Workboard")}
             statTile('Active Agents', String(running), running > 0 ? 'Live sessions are burning tokens now.' : 'No workers are on the field.') +
             statTile('Attention', String(attentionCount), attentionCount > 0 ? 'Start with red lanes and stalled sessions.' : 'No workflow is demanding intervention.') +
             statTile('Heat Radar', hot || 'Calm', hot ? 'Busy boards: ' + escapeHtml(hot) : 'No noisy lanes at the moment.');
+        }
+
+        function renderRunningWorkflowStrip() {
+          const stripEl = document.getElementById('running-workflows');
+          const noteEl = document.getElementById('running-workflows-note');
+          if (!stripEl || !noteEl) return;
+
+          const liveEntries = latestList
+            .filter((entry) => Number(entry.counts ? entry.counts.running || 0 : 0) > 0)
+            .sort((left, right) => {
+              const runningDelta = Number(right.counts ? right.counts.running || 0 : 0) - Number(left.counts ? left.counts.running || 0 : 0);
+              if (runningDelta !== 0) {
+                return runningDelta;
+              }
+
+              const attentionDelta = workflowAttention(right).score - workflowAttention(left).score;
+              if (attentionDelta !== 0) {
+                return attentionDelta;
+              }
+
+              return workflowTitle(left).localeCompare(workflowTitle(right));
+            });
+
+          if (liveEntries.length === 0) {
+            noteEl.textContent = 'No workflows are actively running right now. This strip stays pinned so the live lanes appear the moment work starts.';
+            stripEl.innerHTML = '<div class="live-workflow-empty">No live workflows at the moment. Use the board below for queued retries, alerts, and quiet workflows.</div>';
+            return;
+          }
+
+          const liveAgents = liveEntries.reduce((sum, entry) => sum + Number(entry.counts ? entry.counts.running || 0 : 0), 0);
+          noteEl.textContent = liveEntries.length + ' workflow' + (liveEntries.length === 1 ? '' : 's') + ' live across ' + liveAgents + ' active agent' + (liveAgents === 1 ? '' : 's') + '.';
+
+          stripEl.innerHTML = liveEntries.map((entry) => {
+            const activeClass = entry.key === selectedKey ? 'active' : '';
+            const health = workflowHealth(entry);
+            const running = Number(entry.counts ? entry.counts.running || 0 : 0);
+            const retrying = Number(entry.counts ? entry.counts.retrying || 0 : 0);
+            const stateMeta = retrying > 0
+              ? running + ' running / ' + retrying + ' retrying'
+              : running + ' running';
+
+            return '<button class="live-workflow-card ' + activeClass + '" data-key="' + escapeHtml(entry.key) + '">' +
+              '<div class="live-workflow-top">' +
+                '<div class="live-workflow-state">' +
+                  '<span class="status-dot tone-' + health.tone + ' ' + (health.tone === 'active' || health.tone === 'alert' ? 'blink' : '') + '"></span>' +
+                  '<span>' + escapeHtml(health.label) + '</span>' +
+                '</div>' +
+                pill(stateMeta, health.tone === 'alert' ? 'danger' : '') +
+              '</div>' +
+              '<h3 class="live-workflow-name">' + escapeHtml(workflowTitle(entry)) + '</h3>' +
+              '<div class="live-workflow-meta">' + escapeHtml(trackerSummary(entry.tracker)) + ' · ' + escapeHtml(summarizeNextSweep(entry.polling)) + '</div>' +
+            '</button>';
+          }).join('');
+
+          stripEl.querySelectorAll('button[data-key]').forEach((button) => {
+            button.addEventListener('click', () => {
+              const key = button.getAttribute('data-key');
+              if (!key) return;
+              setSelectedKey(key);
+              void load();
+            });
+          });
         }
 
         function renderList(payload) {
@@ -1850,6 +2069,7 @@ ${renderBrandHead("Symphony Workboard")}
             const workflows = await fetchWorkflows();
             renderOverview(workflows);
             renderList(workflows);
+            renderRunningWorkflowStrip();
 
             if (selectedKey) {
               const detail = await fetchWorkflowDetail(selectedKey);
@@ -3052,6 +3272,7 @@ ${renderBrandHead("Symphony Workboard")}
           filterInput.addEventListener('input', (event) => {
             filterText = String(event.target && event.target.value ? event.target.value : '').trim().toLowerCase();
             renderList({ workflows: latestList, counts: { workflows: latestList.length, running: 0, retrying: 0 } });
+            renderRunningWorkflowStrip();
             if (selectedKey) {
               void fetchWorkflowDetail(selectedKey).then(renderDetail);
             }

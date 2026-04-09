@@ -20,6 +20,7 @@ import { SymphonyError } from "../utils/errors";
 
 const CONTINUATION_RETRY_DELAY_MS = 1_000;
 const FAILURE_RETRY_BASE_MS = 10_000;
+const BACKGROUND_RUNNING_RECONCILE_INTERVAL_MS = 5_000;
 
 interface OrchestratorOptions {
   workflowStore: WorkflowStore;
@@ -63,8 +64,10 @@ export class Orchestrator {
   private codexRateLimits: Record<string, unknown> | null = null;
 
   private tickTimer: ReturnType<typeof setTimeout> | null = null;
+  private runningIssueReconcileTimer: ReturnType<typeof setTimeout> | null = null;
   private nextPollDueAtMs: number | null = null;
   private pollCheckInProgress = false;
+  private runningIssueReconcileInProgress = false;
   private started = false;
   private readonly listeners = new Set<() => void>();
 
@@ -118,6 +121,9 @@ export class Orchestrator {
       this.nextPollDueAtMs = null;
     }
 
+    this.clearRunningIssueReconcileTimer();
+    this.runningIssueReconcileInProgress = false;
+
     for (const retryEntry of this.retryAttempts.values()) {
       clearTimeout(retryEntry.timer);
     }
@@ -164,6 +170,7 @@ export class Orchestrator {
     const running = [...this.running.entries()].map(([issueId, entry]) => ({
       issueId,
       identifier: entry.identifier,
+      issueTitle: entry.issue.title,
       state: entry.issue.state,
       sessionId: entry.sessionId,
       codexAppServerPid: entry.codexAppServerPid,
@@ -199,7 +206,7 @@ export class Orchestrator {
       },
       rateLimits: this.codexRateLimits,
       polling: {
-        checking: this.pollCheckInProgress,
+        checking: this.pollCheckInProgress || this.runningIssueReconcileInProgress,
         nextPollInMs:
           this.nextPollDueAtMs !== null ? Math.max(0, this.nextPollDueAtMs - nowMs) : null,
         pollIntervalMs: this.currentConfig.polling.intervalMs,
@@ -245,6 +252,7 @@ export class Orchestrator {
       return;
     }
 
+    this.clearRunningIssueReconcileTimer();
     this.pollCheckInProgress = true;
     this.nextPollDueAtMs = null;
     this.notifyUpdate();
@@ -289,6 +297,90 @@ export class Orchestrator {
         this.nextPollDueAtMs = null;
         this.tickTimer = null;
       }
+      this.refreshRunningIssueReconcileSchedule();
+      this.notifyUpdate();
+    }
+  }
+
+  private refreshRunningIssueReconcileSchedule(): void {
+    const config = this.currentConfig;
+
+    if (
+      !config ||
+      !this.started ||
+      !shouldUseBackgroundRunningIssueReconcile(config.polling.intervalMs, this.running.size)
+    ) {
+      this.clearRunningIssueReconcileTimer();
+      return;
+    }
+
+    if (
+      this.pollCheckInProgress ||
+      this.runningIssueReconcileInProgress ||
+      this.runningIssueReconcileTimer
+    ) {
+      return;
+    }
+
+    this.scheduleRunningIssueReconcile(BACKGROUND_RUNNING_RECONCILE_INTERVAL_MS);
+  }
+
+  private clearRunningIssueReconcileTimer(): void {
+    if (!this.runningIssueReconcileTimer) {
+      return;
+    }
+
+    clearTimeout(this.runningIssueReconcileTimer);
+    this.runningIssueReconcileTimer = null;
+  }
+
+  private scheduleRunningIssueReconcile(delayMs: number): void {
+    if (!this.started) {
+      return;
+    }
+
+    this.clearRunningIssueReconcileTimer();
+    this.runningIssueReconcileTimer = setTimeout(() => {
+      this.runningIssueReconcileTimer = null;
+      void this.runRunningIssueReconcileCycle();
+    }, delayMs);
+  }
+
+  private async runRunningIssueReconcileCycle(): Promise<void> {
+    if (
+      !this.started ||
+      !this.currentConfig ||
+      !shouldUseBackgroundRunningIssueReconcile(this.currentConfig.polling.intervalMs, this.running.size)
+    ) {
+      this.clearRunningIssueReconcileTimer();
+      return;
+    }
+
+    if (this.pollCheckInProgress || this.runningIssueReconcileInProgress) {
+      this.refreshRunningIssueReconcileSchedule();
+      return;
+    }
+
+    this.runningIssueReconcileInProgress = true;
+    this.notifyUpdate();
+
+    try {
+      this.refreshRuntimeConfig();
+
+      if (
+        !shouldUseBackgroundRunningIssueReconcile(this.requireConfig().polling.intervalMs, this.running.size)
+      ) {
+        return;
+      }
+
+      await this.reconcileRunningIssues();
+    } catch (error) {
+      this.logWarn("Background running issue reconcile failed", {
+        reason: String(error),
+      });
+    } finally {
+      this.runningIssueReconcileInProgress = false;
+      this.refreshRunningIssueReconcileSchedule();
       this.notifyUpdate();
     }
   }
@@ -542,6 +634,7 @@ export class Orchestrator {
       attempt,
     });
 
+    this.refreshRunningIssueReconcileSchedule();
     this.notifyUpdate();
 
     void this.runWorker(issueId, currentIssue, tracker, attempt, abortController.signal);
@@ -580,7 +673,7 @@ export class Orchestrator {
 
   private async onWorkerExit(
     issueId: string,
-    sourceIssueId: string,
+    sourceIssueId: string | null,
     reason: "normal" | "cancelled" | string,
   ): Promise<void> {
     const runningEntry = this.running.get(issueId);
@@ -618,6 +711,7 @@ export class Orchestrator {
         });
       }
 
+      this.refreshRunningIssueReconcileSchedule();
       this.notifyUpdate();
       return;
     }
@@ -627,6 +721,7 @@ export class Orchestrator {
         issue_id: issueId,
         issue_identifier: runningEntry.identifier,
       });
+      this.refreshRunningIssueReconcileSchedule();
       this.notifyUpdate();
       return;
     }
@@ -644,13 +739,16 @@ export class Orchestrator {
       reason,
     });
 
+    this.refreshRunningIssueReconcileSchedule();
     this.notifyUpdate();
   }
 
-  private async refreshClaimedIssue(issueId: string, sourceIssueId: string): Promise<Issue | null> {
+  private async refreshClaimedIssue(issueId: string, sourceIssueId: string | null): Promise<Issue | null> {
+    const trackerIssueId = sourceIssueId ?? issueId;
+
     try {
       const tracker = this.createTracker();
-      const refreshed = await tracker.fetchIssueStatesByIds([sourceIssueId]);
+      const refreshed = await tracker.fetchIssueStatesByIds([trackerIssueId]);
       const currentIssue = refreshed[0] ?? null;
 
       if (currentIssue) {
@@ -662,7 +760,7 @@ export class Orchestrator {
       return null;
     } catch (error) {
       this.logWarn("Failed to refresh issue fingerprint after worker completion", {
-        issue_id: sourceIssueId,
+        issue_id: trackerIssueId,
         issue_identifier: this.running.get(issueId)?.identifier ?? issueId,
         reason: String(error),
       });
@@ -761,6 +859,8 @@ export class Orchestrator {
     if (cleanupWorkspace) {
       void this.workspaceManager.removeIssueWorkspace(runningEntry.identifier);
     }
+
+    this.refreshRunningIssueReconcileSchedule();
   }
 
   private scheduleIssueRetry(issueId: string, attempt: number, metadata: RetryMetadata): void {
@@ -1026,6 +1126,13 @@ const failureRetryDelay = (attempt: number, maxRetryBackoffMs: number): number =
   return Math.min(FAILURE_RETRY_BASE_MS * 2 ** power, maxRetryBackoffMs);
 };
 
+const shouldUseBackgroundRunningIssueReconcile = (
+  pollIntervalMs: number,
+  runningCount: number,
+): boolean => {
+  return pollIntervalMs <= 0 && runningCount > 0;
+};
+
 const isCandidateIssue = (issue: Issue, config: EffectiveConfig): boolean => {
   if (!issue.id || !issue.identifier || !issue.title || !issue.state) {
     return false;
@@ -1264,6 +1371,7 @@ const truncateReason = (value: string, maxLength = 512): string => {
 export const orchestratorTestUtils = {
   runningSeconds,
   failureRetryDelay,
+  shouldUseBackgroundRunningIssueReconcile,
   isCandidateIssue,
   isTodoBlockedByNonTerminal,
   sortIssuesForDispatch,

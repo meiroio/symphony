@@ -1,15 +1,11 @@
 import type { Elysia } from "elysia";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+
+import appleTouchIconPath from "./assets/apple-touch-icon.png" with { type: "file" };
+import icon192Path from "./assets/icon-192.png" with { type: "file" };
+import icon512Path from "./assets/icon-512.png" with { type: "file" };
+import musicKeySvg from "../../music.svg" with { type: "text" };
 
 const BRAND_CACHE_CONTROL = "public, max-age=86400";
-const ASSET_DIR = join(import.meta.dir, "assets");
-const SVG_PATH = join(import.meta.dir, "..", "..", "music.svg");
-const SVG_FALLBACK_PATH = join(ASSET_DIR, "music-key.svg");
-const PNG_180_PATH = join(ASSET_DIR, "apple-touch-icon.png");
-const PNG_192_PATH = join(ASSET_DIR, "icon-192.png");
-const PNG_512_PATH = join(ASSET_DIR, "icon-512.png");
-
 const BRAND_ASSET_PATHS = new Set([
   "/favicon.svg",
   "/apple-touch-icon.png",
@@ -18,15 +14,7 @@ const BRAND_ASSET_PATHS = new Set([
   "/site.webmanifest",
 ]);
 
-const readBrandSvg = (): string => {
-  try {
-    return readFileSync(SVG_PATH, "utf8");
-  } catch {
-    return readFileSync(SVG_FALLBACK_PATH, "utf8");
-  }
-};
-
-export const MUSIC_KEY_FAVICON_SVG = readBrandSvg();
+export const MUSIC_KEY_FAVICON_SVG = musicKeySvg;
 
 const inlineBrandSvg = MUSIC_KEY_FAVICON_SVG.replace(/^<\?xml[^>]*>\s*/, "").replace(
   "<svg ",
@@ -64,9 +52,9 @@ const webManifest = JSON.stringify(
 
 export const registerBrandRoutes = (app: Elysia): void => {
   app.get("/favicon.svg", () => musicKeyFaviconResponse());
-  app.get("/apple-touch-icon.png", () => pngResponse(PNG_180_PATH));
-  app.get("/icon-192.png", () => pngResponse(PNG_192_PATH));
-  app.get("/icon-512.png", () => pngResponse(PNG_512_PATH));
+  app.get("/apple-touch-icon.png", () => binaryAssetResponse(appleTouchIconPath, "image/png"));
+  app.get("/icon-192.png", () => binaryAssetResponse(icon192Path, "image/png"));
+  app.get("/icon-512.png", () => binaryAssetResponse(icon512Path, "image/png"));
   app.get("/site.webmanifest", () => webManifestResponse());
 };
 
@@ -98,10 +86,10 @@ export const musicKeyFaviconResponse = (): Response => {
   });
 };
 
-const pngResponse = (path: string): Response => {
-  return new Response(Bun.file(path), {
+const binaryAssetResponse = (assetPath: string, contentType: string): Response => {
+  return new Response(Bun.file(assetPath), {
     headers: {
-      "content-type": "image/png",
+      "content-type": contentType,
       "cache-control": BRAND_CACHE_CONTROL,
     },
   });

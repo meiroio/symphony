@@ -20,6 +20,7 @@ describe("multi workflow dashboard", () => {
         {
           issueId: "issue-stale",
           identifier: "PIP-36",
+          issueTitle: "Export and import of complete instance configuration",
           state: "In Review",
           sessionId: "session-stale",
           codexAppServerPid: null,
@@ -166,6 +167,7 @@ describe("multi workflow dashboard", () => {
     expect(html).toContain('href="/apple-touch-icon.png"');
     expect(html).toContain('href="/site.webmanifest"');
     expect(html).toContain("Reading the board");
+    expect(html).toContain("Running workflows");
     expect(html).toContain("Live updates: On");
 
     const faviconResponse = await fetch(`${baseUrl}/favicon.svg`);

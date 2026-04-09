@@ -30,6 +30,116 @@ bun run src/cli.ts /absolute/path/to/WORKFLOW.md --port 8787
 
 If no workflow path is passed, the CLI uses `./WORKFLOW.md` from the current working directory.
 
+## Binary Release
+
+Build a portable release directory with:
+
+- compiled `symphony` binary
+- `.env` template
+- editable `workflows/` copied from the current local workflow directory
+
+Current-platform build:
+
+```bash
+cd bun
+bun run build:release
+```
+
+Cross-compile for Hetzner x64:
+
+```bash
+cd bun
+bun run build:release:linux-x64
+```
+
+Cross-compile for Hetzner ARM64:
+
+```bash
+cd bun
+bun run build:release:linux-arm64
+```
+
+Artifact layout:
+
+```text
+dist/release/<target>/
+  symphony
+  .env
+  workflows/
+```
+
+Run the compiled binary from inside the release directory:
+
+```bash
+cd dist/release/<target>
+./symphony ./workflows
+```
+
+Notes:
+
+- The build reads workflow files from `./workflows` by default and fails if the directory is missing or empty.
+- Workflow files are not embedded into the binary; they stay as normal `.md` files and can be edited in place after deployment.
+- The generated `.env` is copied from `.env.example`; fill in real secrets before deployment.
+- Use `--target bun-linux-x64` or `--target bun-linux-arm64` through `scripts/build-release.ts` for explicit platform targets.
+
+## Bare Metal (systemd)
+
+For Linux hosts, the default deployment flow is:
+
+```bash
+cd bun
+./scripts/deploy-bare-metal.sh --ssh-target deploy@example.com
+```
+
+That local wrapper:
+
+- builds `dist/release/<target>/` locally when `--release-dir` is not provided
+- uploads the release bundle to the server with `scp`
+- uploads and runs the remote installer script over `ssh`
+
+Remote install behavior:
+
+- installs the bundle into a versioned release under `/opt/symphony/releases`
+- creates `/opt/symphony/current` as the active symlink
+- preserves mutable host state under `/opt/symphony/shared`
+- installs `/etc/systemd/system/symphony.service`
+- reuses the existing service user's login home when that user already exists, otherwise creates a service home under `/var/lib/symphony`
+- creates a persistent workspace root under `/var/lib/symphony`
+
+Default persistent paths:
+
+```text
+/opt/symphony/current
+/opt/symphony/shared/.env
+/opt/symphony/shared/workflows/
+/var/lib/symphony/workspaces
+```
+
+Notes:
+
+- `deploy-bare-metal.sh` is intended to be run locally.
+- `install-bare-metal-service.sh` is intended to be run on the Linux server itself.
+- If the `symphony` user already exists, the installer now reuses that account's home directory for `HOME`, Codex auth, GitHub auth, and SSH config.
+- The generated `systemd` unit includes the service user's `~/.bun/bin` and `~/.local/bin` on `PATH`, so Bun-installed `codex` is available to workflow commands.
+- On first install, it seeds `shared/workflows/` from the release bundle and rewrites the shipped sample `workspace.root` value from `/tmp/symphony-bun-workspaces` to `/var/lib/symphony/workspaces`.
+- Existing `shared/.env` and `shared/workflows/` are preserved on later deploys by default.
+- Use `--sync-workflows` when you want to replace the shared workflow files from a newer release bundle.
+- Use `--workspace-root <path>` if you want a different persistent workspace location.
+
+Manual server-side install example after copying files yourself:
+
+```bash
+sudo ./scripts/install-bare-metal-service.sh --release-dir /tmp/symphony-release
+```
+
+First-time auth for the service user:
+
+```bash
+SERVICE_HOME="$(getent passwd symphony | cut -d: -f6)"
+sudo -u symphony env HOME="$SERVICE_HOME" XDG_CONFIG_HOME="$SERVICE_HOME/.config" codex login --device-auth
+sudo -u symphony env HOME="$SERVICE_HOME" XDG_CONFIG_HOME="$SERVICE_HOME/.config" gh auth login
+```
+
 ## Docker
 
 Build image:
@@ -78,7 +188,8 @@ cd bun
 docker run --rm \
   -p 8788:8788 \
   -e LINEAR_API_KEY="$LINEAR_API_KEY" \
-  -e LINEAR_WEBHOOK_SECRET="$LINEAR_WEBHOOK_SECRET" \
+  -e LINEAR_PIP_WEBHOOK_SECRET="$LINEAR_PIP_WEBHOOK_SECRET" \
+  -e LINEAR_TIM_WEBHOOK_SECRET="$LINEAR_TIM_WEBHOOK_SECRET" \
   -v /tmp/symphony-bun-workspaces:/tmp/symphony-bun-workspaces \
   -v symphony_codex_home:/home/bun/.codex \
   -v symphony_gh_home:/home/bun/.config/gh \
@@ -151,7 +262,7 @@ To run push-driven orchestration (Linear -> Symphony) instead of periodic pollin
 tracker:
   kind: linear
   webhook_path: "/api/v1/webhooks/linear"
-  webhook_secret: "$LINEAR_WEBHOOK_SECRET"
+  webhook_secret: "$LINEAR_<WORKFLOW>_WEBHOOK_SECRET"
 polling:
   interval_ms: 0
 ```
@@ -163,7 +274,8 @@ https://<your-host>/api/v1/webhooks/linear-team-review
 https://<your-host>/api/v1/webhooks/linear-timetracking-factory
 ```
 
-3. Use the same signing secret value in Linear webhook settings and `LINEAR_WEBHOOK_SECRET`.
+3. Use a distinct signing secret per workflow and reference the matching env var in that workflow file.
+   Example: `LINEAR_PIP_WEBHOOK_SECRET` for `linear-team-review`, `LINEAR_TIM_WEBHOOK_SECRET` for `linear-timetracking-factory`.
 
 Notes:
 
@@ -266,7 +378,7 @@ Workflow file:
 - For phased software-factory automation (Define -> In Progress -> Code Review -> Design Review -> Testing -> Done), start from `./WORKFLOW.linear.software-factory.sample.md`.
 - For the TimeTracking factory specifically, start from `./WORKFLOW.linear.timetracking.factory.sample.md`.
 - Label-based routing is supported via `tracker.required_labels`; combine it with `active_states: ["*"]` for label-first workflows.
-- Current team-review local flow uses wildcard routing and applies label `crok` on approved reviews; human manually decides QA routing.
+- Current team-review local flow is bound to `In Review`, runs `review-swarm` plus `web-design-guidelines` in the same pass, applies label `crok` on approval, and leaves final routing to a human.
 
 ```bash
 cd /Users/vorcigernix/Dev/symphony/bun

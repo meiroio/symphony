@@ -144,6 +144,12 @@ describe("orchestrator conformance logic", () => {
     expect(orchestratorTestUtils.failureRetryDelay(20, 300_000)).toBe(300_000);
   });
 
+  test("background running issue reconcile is only enabled for event-driven active runs", () => {
+    expect(orchestratorTestUtils.shouldUseBackgroundRunningIssueReconcile(0, 1)).toBeTrue();
+    expect(orchestratorTestUtils.shouldUseBackgroundRunningIssueReconcile(0, 0)).toBeFalse();
+    expect(orchestratorTestUtils.shouldUseBackgroundRunningIssueReconcile(1_000, 1)).toBeFalse();
+  });
+
   test("extracts absolute token usage from nested payload shapes", () => {
     const usage = orchestratorTestUtils.extractAbsoluteUsage({
       event: "notification",
