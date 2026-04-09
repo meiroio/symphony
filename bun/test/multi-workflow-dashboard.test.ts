@@ -4,10 +4,15 @@ import { MultiWorkflowDashboard } from "../src/http/multi-workflow-dashboard";
 import type { RuntimeSnapshot } from "../src/types";
 
 const activeDashboards: MultiWorkflowDashboard[] = [];
+const activeWebhookServers: Array<Bun.Server<unknown>> = [];
 
 afterEach(() => {
   for (const dashboard of activeDashboards.splice(0, activeDashboards.length)) {
     dashboard.stop();
+  }
+
+  for (const server of activeWebhookServers.splice(0, activeWebhookServers.length)) {
+    server.stop(true);
   }
 });
 
@@ -184,6 +189,136 @@ describe("multi workflow dashboard", () => {
     expect(manifestResponse.headers.get("content-type")).toContain("application/manifest+json");
     const manifest = (await manifestResponse.json()) as Record<string, unknown>;
     expect(manifest.short_name).toBe("Symphony");
+  });
+
+  test("fans out legacy linear webhook path to all matching workflows", async () => {
+    const reviewRequests: Array<Record<string, string | null>> = [];
+    const factoryRequests: Array<Record<string, string | null>> = [];
+
+    const reviewServer = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: async (request) => {
+        reviewRequests.push({
+          path: new URL(request.url).pathname,
+          body: await request.text(),
+          contentType: request.headers.get("content-type"),
+          linearSignature: request.headers.get("linear-signature"),
+          xLinearSignature: request.headers.get("x-linear-signature"),
+          userAgent: request.headers.get("user-agent"),
+        });
+
+        return Response.json({ accepted: true, workflow: "review" }, { status: 202 });
+      },
+    });
+    activeWebhookServers.push(reviewServer);
+
+    const factoryServer = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: async (request) => {
+        factoryRequests.push({
+          path: new URL(request.url).pathname,
+          body: await request.text(),
+          contentType: request.headers.get("content-type"),
+          linearSignature: request.headers.get("linear-signature"),
+          xLinearSignature: request.headers.get("x-linear-signature"),
+          userAgent: request.headers.get("user-agent"),
+        });
+
+        return Response.json({ accepted: true, workflow: "factory" }, { status: 202 });
+      },
+    });
+    activeWebhookServers.push(factoryServer);
+
+    const dashboard = new MultiWorkflowDashboard({
+      entriesProvider: () => [
+        {
+          key: "review",
+          workflowId: "linear-team-review",
+          workflowPath: "/tmp/workflows/review.md",
+          httpPort: reviewServer.port ?? null,
+          webhookPath: "/api/v1/webhooks/linear",
+          tracker: {
+            kind: "linear",
+            scopeType: "team",
+            scopeLabel: "PIP",
+          },
+          snapshot: snapshot({ workflowId: "linear-team-review" }),
+        },
+        {
+          key: "factory",
+          workflowId: "linear-timetracking-factory",
+          workflowPath: "/tmp/workflows/factory.md",
+          httpPort: factoryServer.port ?? null,
+          webhookPath: "/api/v1/webhooks/linear",
+          tracker: {
+            kind: "linear",
+            scopeType: "project",
+            scopeLabel: "symphony-2f9fcdc281e6",
+          },
+          snapshot: snapshot({ workflowId: "linear-timetracking-factory" }),
+        },
+      ],
+      refreshByKey: () => null,
+      refreshAll: () => [],
+    });
+
+    const port = dashboard.start(0, "127.0.0.1");
+    activeDashboards.push(dashboard);
+
+    const body = JSON.stringify({
+      action: "update",
+      type: "Issue",
+      data: { id: "issue-1" },
+    });
+
+    const response = await fetch(`http://127.0.0.1:${port}/api/v1/webhooks/linear`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "linear-signature": "signature-a",
+        "x-linear-signature": "signature-b",
+        "user-agent": "Linear-Test",
+      },
+      body,
+    });
+
+    expect(response.status).toBe(202);
+    expect((await response.json()) as Record<string, unknown>).toEqual({
+      queued: true,
+      workflows: [
+        {
+          workflow_id: "linear-team-review",
+          status: 202,
+        },
+        {
+          workflow_id: "linear-timetracking-factory",
+          status: 202,
+        },
+      ],
+    });
+
+    expect(reviewRequests).toEqual([
+      {
+        path: "/api/v1/webhooks/linear",
+        body,
+        contentType: "application/json",
+        linearSignature: "signature-a",
+        xLinearSignature: "signature-b",
+        userAgent: "Linear-Test",
+      },
+    ]);
+    expect(factoryRequests).toEqual([
+      {
+        path: "/api/v1/webhooks/linear",
+        body,
+        contentType: "application/json",
+        linearSignature: "signature-a",
+        xLinearSignature: "signature-b",
+        userAgent: "Linear-Test",
+      },
+    ]);
   });
 });
 

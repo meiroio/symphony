@@ -162,20 +162,40 @@ const buildApp = (
       return errorEnvelope("invalid_workflow_id", "workflow_id is required");
     }
 
-    const entry = entriesProvider().find((candidate) => candidate.workflowId === workflowId) ?? null;
-    if (!entry) {
+    const requestPath = new URL(request.url).pathname;
+    const entries = entriesProvider();
+    const directEntry = entries.find((candidate) => candidate.workflowId === workflowId) ?? null;
+
+    if (directEntry) {
+      const refresh = refreshByKey(directEntry.key);
+      if (!refresh) {
+        set.status = 503;
+        return errorEnvelope("workflow_unavailable", "Workflow refresh unavailable");
+      }
+
+      const webhookPath = directEntry.webhookPath ?? "/api/v1/webhooks/linear";
+      const response = await forwardWebhookToWorkflow(request, directEntry.httpPort, webhookPath);
+      set.status = response.status;
+      return response.body;
+    }
+
+    const compatibilityEntries = entries.filter((candidate) => {
+      return (candidate.webhookPath ?? "/api/v1/webhooks/linear") === requestPath;
+    });
+
+    if (compatibilityEntries.length === 0) {
       set.status = 404;
       return errorEnvelope("workflow_not_found", "Workflow not found");
     }
 
-    const refresh = refreshByKey(entry.key);
-    if (!refresh) {
-      set.status = 503;
-      return errorEnvelope("workflow_unavailable", "Workflow refresh unavailable");
-    }
-
-    const webhookPath = entry.webhookPath ?? "/api/v1/webhooks/linear";
-    const response = await forwardWebhookToWorkflow(request, entry.httpPort, webhookPath);
+    const response = await forwardWebhookToWorkflows(
+      request,
+      compatibilityEntries.map((entry) => ({
+        workflowId: entry.workflowId ?? entry.key,
+        port: entry.httpPort,
+        path: entry.webhookPath ?? "/api/v1/webhooks/linear",
+      })),
+    );
     set.status = response.status;
     return response.body;
   });
@@ -291,13 +311,16 @@ const forwardWebhookToWorkflow = async (
   port: number | null,
   path: string,
 ): Promise<{ status: number; body: Record<string, unknown> }> => {
-  if (typeof port !== "number") {
-    return {
-      status: 503,
-      body: errorEnvelope("workflow_http_unavailable", "Workflow HTTP server is unavailable"),
-    };
-  }
+  const payload = await extractWebhookForwardPayload(request);
+  return forwardWebhookToWorkflowPayload(payload, port, path);
+};
 
+const extractWebhookForwardPayload = async (
+  request: Request,
+): Promise<{
+  rawBody: string;
+  headers: Headers;
+}> => {
   const rawBody = await request.text();
   const headers = new Headers();
   const contentType = request.headers.get("content-type");
@@ -318,18 +341,39 @@ const forwardWebhookToWorkflow = async (
     headers.set("user-agent", userAgent);
   }
 
+  return {
+    rawBody,
+    headers,
+  };
+};
+
+const forwardWebhookToWorkflowPayload = async (
+  payload: {
+    rawBody: string;
+    headers: Headers;
+  },
+  port: number | null,
+  path: string,
+): Promise<{ status: number; body: Record<string, unknown> }> => {
+  if (typeof port !== "number") {
+    return {
+      status: 503,
+      body: errorEnvelope("workflow_http_unavailable", "Workflow HTTP server is unavailable"),
+    };
+  }
+
   try {
     const upstream = await fetch(`http://127.0.0.1:${port}${path}`, {
       method: "POST",
-      headers,
-      body: rawBody,
+      headers: new Headers(payload.headers),
+      body: payload.rawBody,
     });
 
-    const payload = await upstream.json().catch(() => null);
-    if (payload && typeof payload === "object") {
+    const responsePayload = await upstream.json().catch(() => null);
+    if (responsePayload && typeof responsePayload === "object") {
       return {
         status: upstream.status,
-        body: payload as Record<string, unknown>,
+        body: responsePayload as Record<string, unknown>,
       };
     }
 
@@ -345,6 +389,49 @@ const forwardWebhookToWorkflow = async (
       body: errorEnvelope("workflow_http_proxy_error", `Failed to reach workflow webhook: ${formatError(error)}`),
     };
   }
+};
+
+const forwardWebhookToWorkflows = async (
+  request: Request,
+  targets: Array<{
+    workflowId: string;
+    port: number | null;
+    path: string;
+  }>,
+): Promise<{ status: number; body: Record<string, unknown> }> => {
+  const payload = await extractWebhookForwardPayload(request);
+  const forwarded = await Promise.all(
+    targets.map(async (target) => {
+      const response = await forwardWebhookToWorkflowPayload(payload, target.port, target.path);
+      return {
+        workflow_id: target.workflowId,
+        status: response.status,
+        body: response.body,
+      };
+    }),
+  );
+
+  const accepted = forwarded.filter((entry) => entry.status >= 200 && entry.status < 300);
+  if (accepted.length === 0) {
+    const first = forwarded[0];
+    return {
+      status: first?.status ?? 503,
+      body:
+        first?.body ??
+        errorEnvelope("workflow_http_unavailable", "Workflow HTTP server is unavailable"),
+    };
+  }
+
+  return {
+    status: 202,
+    body: {
+      queued: true,
+      workflows: forwarded.map((entry) => ({
+        workflow_id: entry.workflow_id,
+        status: entry.status,
+      })),
+    },
+  };
 };
 
 const countStaleAgents = (snapshot: RuntimeSnapshot): number => {
